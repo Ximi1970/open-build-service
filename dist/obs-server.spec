@@ -232,11 +232,11 @@ Requires(pre):  group(www)
 # For apache
 Requires:       apache2
 Requires:       apache2-mod_xforward
-Requires:       ruby2.5-rubygem-passenger
+Requires:       %{rubygem passenger}
 Requires:       rubygem-passenger-apache2
 Conflicts:      memcached < 1.4
 
-Requires:       ruby(abi) = 2.5.0
+Requires:       %{rb_default_ruby_suffix}
 # for test suite:
 BuildRequires:  createrepo_c
 BuildRequires:  curl
