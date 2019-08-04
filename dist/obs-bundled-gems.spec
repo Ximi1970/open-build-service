@@ -41,8 +41,8 @@ BuildRequires:  mysql-devel
 BuildRequires:  nodejs
 BuildRequires:  openldap2-devel
 BuildRequires:  python-devel
-BuildRequires:  ruby2.5-devel
-BuildRequires:  rubygem(ruby:2.5.0:bundler)
+BuildRequires:  %{rb_default_ruby_suffix}-devel
+BuildRequires:  %{rubygem bundler}
 
 BuildRoot:      %{_tmppath}/%{name}-%{version}-build
 
@@ -62,9 +62,9 @@ Requires:       mysql
 Requires:       obs-bundled-gems = %{version}
 Requires:       sphinx >= 2.1.8
 Requires:       perl(GD)
-Requires:       rubygem(ruby:2.5.0:bundler)
-Requires:       rubygem(ruby:2.5.0:rake:%{rake_version})
-Requires:       rubygem(ruby:2.5.0:rack:%{rack_version})
+Requires:       %{rubygem bundler)
+Requires:       %{rubygem rake:%{rake_version}}
+Requires:       %{rubygem rack:%{rack_version}}
 
 %description -n obs-api-deps
 To simplify splitting the test suite packages off the main package,
@@ -104,15 +104,17 @@ bundle config build.nokogiri --use-system-libraries
 %install
 bundle --local --path %{buildroot}%_libdir/obs-api/
 
+%define rb_default_path %(echo %{rb_default_ruby_abi} | sed -e 's?:?/?g')
+
 # test that the rake and rack macros is still matching our Gemfile
-test -f %{buildroot}%_libdir/obs-api/ruby/2.5.0/gems/rake-%{rake_version}/rake.gemspec
-test -f %{buildroot}%_libdir/obs-api/ruby/2.5.0/gems/rack-%{rack_version}/rack.gemspec
+test -f %{buildroot}%_libdir/obs-api/%{rb_default_path}/gems/rake-%{rake_version}/rake.gemspec
+test -f %{buildroot}%_libdir/obs-api/%{rb_default_path}/gems/rack-%{rack_version}/rack.gemspec
 
 # run gem clean up script
 /usr/lib/rpm/gem_build_cleanup.sh %{buildroot}%_libdir/obs-api/ruby/*/
 
 # work around sassc bug - and install libsass
-sassc_dir=$(ls -1d %{buildroot}%_libdir/obs-api/ruby/2.5.0/gems/sassc-2*)
+sassc_dir=$(ls -1d %{buildroot}%_libdir/obs-api/%{rb_default_path}/gems/sassc-2*)
 install -D -m 755 $sassc_dir/ext/libsass/lib/libsass.so $sassc_dir/lib
 sed -i -e 's,/ext/libsass,,' $sassc_dir/lib/sassc/native.rb
 
@@ -137,7 +139,7 @@ find %{buildroot}%_libdir/obs-api -name .gitignore | xargs rm -rf
 
 # fix interpreter in installed binaries
 for bin in %{buildroot}%_libdir/obs-api/ruby/*/bin/*; do
-  sed -i -e 's,/usr/bin/env ruby.ruby2.5,/usr/bin/ruby.ruby2.5,' $bin
+  sed -i -e 's,/usr/bin/env ruby.%{rb_default_ruby_suffix},/usr/bin/ruby.%{rb_default_ruby_suffix},' $bin
 done
 
 # remove exec bit from all other files still containing /usr/bin/env - mostly helper scripts
