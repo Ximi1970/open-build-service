@@ -113,7 +113,7 @@ test -f %{buildroot}%_libdir/obs-api/%{rb_default_path}/gems/rack-%{rack_version
 /usr/lib/rpm/gem_build_cleanup.sh %{buildroot}%_libdir/obs-api/ruby/*/
 
 # work around sassc bug - and install libsass
-sassc_dir=$(ls -1d %{buildroot}%_libdir/obs-api/ruby/2.5.0/gems/sassc-2*)
+sassc_dir=$(ls -1d %{buildroot}%_libdir/obs-api/%{rb_default_path}/gems/sassc-2*)
 install -D -m 755 $sassc_dir/ext/libsass/lib/libsass.so $sassc_dir/lib
 sed -i -e 's,/ext/libsass,,' $sassc_dir/lib/sassc/native.rb
 
