@@ -27,7 +27,6 @@ License:        GPL-2.0-only OR GPL-3.0-only
 Group:          Productivity/Networking/Web/Utilities
 Url:            http://www.openbuildservice.org
 Source0:        Gemfile
-Source1:        Gemfile.lock
 BuildRequires:  autoconf
 BuildRequires:  automake
 BuildRequires:  cyrus-sasl-devel
@@ -93,10 +92,8 @@ echo > README <<EOF
 This package is just a meta package containing requires
 EOF
 
-cp %{S:0} %{S:1} .
-mv Gemfile.lock{,.upstream}
+cp %{S:0} .
 bundle exec rails --version
-diff -urN Gemfile.lock{.upstream,} ||:
 
 %build
 # copy gem files into cache
