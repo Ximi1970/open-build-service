@@ -94,6 +94,9 @@ This package is just a meta package containing requires
 EOF
 
 cp %{S:0} %{S:1} .
+mv Gemfile.lock{,.upstream}
+bundle exec rails --version
+diff -urN Gemfile.lock{.upstream,} ||:
 
 %build
 # copy gem files into cache
