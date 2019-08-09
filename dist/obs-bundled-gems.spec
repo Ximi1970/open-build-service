@@ -43,7 +43,7 @@ BuildRequires:  nodejs
 BuildRequires:  openldap2-devel
 BuildRequires:  python-devel
 BuildRequires:  %{rb_default_ruby_suffix}-devel
-BuildRequires:  %{rubygem bundler}
+BuildRequires:  %{rubygem bundler:1}
 
 BuildRoot:      %{_tmppath}/%{name}-%{version}-build
 
@@ -63,7 +63,7 @@ Requires:       mysql
 Requires:       obs-bundled-gems = %{version}
 Requires:       sphinx >= 2.1.8
 Requires:       perl(GD)
-Requires:       %{rubygem bundler}
+Requires:       %{rubygem bundler:1}
 Requires:       %{rubygem rake:%{rake_version}}
 Requires:       %{rubygem rack:%{rack_version}}
 
