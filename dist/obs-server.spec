@@ -306,6 +306,9 @@ find -name .keep -o -name .gitignore | xargs rm -rf
 export DESTDIR=$RPM_BUILD_ROOT
 
 pushd src/api
+mv Gemfile.lock{,.upstream}
+bundle exec rails --version
+diff -urN Gemfile.lock{.upstream,} ||:
 # configure to the bundled gems
 bundle --local --path %_libdir/obs-api/
 popd
