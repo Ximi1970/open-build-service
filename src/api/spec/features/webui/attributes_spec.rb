@@ -2,6 +2,7 @@ require 'browser_helper'
 
 RSpec.feature 'Attributes', type: :feature, js: true do
   let!(:user) { create(:confirmed_user, :with_home) }
+  let(:attribute) { create(:attrib, project: user.home_project) }
   # AttribTypes are part of the seeds, so we can reuse them
   let!(:attribute_type) { AttribType.find_by(name: 'ImageTemplates') }
 
@@ -30,17 +31,6 @@ RSpec.feature 'Attributes', type: :feature, js: true do
     end
 
     describe 'without permissions' do
-      let!(:other_user) { create(:confirmed_user) }
-
-      scenario 'add attribute with values should fail' do
-        skip_if_bootstrap
-        login other_user
-
-        visit index_attribs_path(project: user.home_project_name)
-        click_link('add-new-attribute')
-        expect(page).to have_content('Sorry, you are not authorized to create this Attrib.')
-      end
-
       scenario 'add valid attribute with lack of permissions' do
         # Database cleaner deletes these tables. But we need them for the
         # permission to function.
@@ -56,38 +46,62 @@ RSpec.feature 'Attributes', type: :feature, js: true do
         expect(page).to have_content('Sorry, you are not authorized to create this Attrib.')
       end
     end
-
-    scenario 'remove attribute' do
-      skip_if_bootstrap
-
-      login user
-      attribute = create(:attrib, project_id: user.home_project.id)
-
-      visit index_attribs_path(project: user.home_project_name)
-
-      accept_alert do
-        find("##{attribute.namespace}-#{attribute.name}-delete").click
-      end
-      expect(page).to have_content('Attribute sucessfully deleted!')
-    end
   end
 
-  describe 'for a project with a package' do
-    let!(:package) do
-      create(:package, project_id: user.home_project.id)
+  context 'with an attribute' do
+    before do
+      # create attrib as user
+      User.session = user
+      attribute
+      User.session = nil
     end
 
-    scenario 'add attribute with values' do
-      skip_if_bootstrap
+    context 'for a project' do
+      context 'without permissions' do
+        let!(:other_user) { create(:confirmed_user) }
 
-      login user
+        scenario 'it is not possible to add an attribute, the link is not shown' do
+          login other_user
 
-      add_attribute_with_values(package)
-      expect(page).to have_content('Attribute was successfully updated.')
+          visit index_attribs_path(project: user.home_project_name)
+          expect(page).not_to have_content('Add a new attribute')
+        end
+      end
 
-      visit index_attribs_path(project: user.home_project_name, package: package.name)
-      attribute_type_value = page.all('#attributes tr td', exact_text: attribute_type.fullname)[0].sibling('td', match: :first).text
-      expect(attribute_type_value).to eq("test\n2nd line\ntest 1")
+      context 'with permissions' do
+        scenario 'remove attribute' do
+          login user
+
+          visit index_attribs_path(project: user.home_project_name)
+          click_link 'Delete attribute'
+          expect(find('#delete-attribute-modal')).to have_text('Delete attribute?')
+          within('#delete-attribute-modal .modal-footer') do
+            expect(page).to have_button('Delete')
+            click_button('Delete')
+          end
+          expect(page).to have_css('#flash')
+          within('#flash') do
+            expect(page).to have_text('Attribute sucessfully deleted!')
+          end
+        end
+      end
+    end
+
+    context 'for a project with a package' do
+      let!(:package) do
+        create(:package, project: user.home_project)
+      end
+
+      scenario 'add attribute with values' do
+        login user
+
+        add_attribute_with_values(package)
+        expect(page).to have_content('Attribute was successfully updated.')
+
+        visit index_attribs_path(project: user.home_project_name, package: package.name)
+        attribute_type_value = page.all('#attributes tr td', exact_text: attribute_type.fullname)[0].sibling('td', match: :first).text
+        expect(attribute_type_value).to eq("test\n2nd line\ntest 1")
+      end
     end
   end
 end

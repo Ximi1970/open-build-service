@@ -9,6 +9,8 @@ class Project < ApplicationRecord
   include HasRatings
   include HasAttributes
   include MaintenanceHelper
+  include PopulateSphinx
+  include ProjectSphinx
   include Project::Errors
   include StagingProject
 
@@ -19,6 +21,7 @@ class Project < ApplicationRecord
   after_destroy_commit :delete_on_backend
 
   after_save :discard_cache
+  after_save :populate_sphinx, if: -> { name_previously_changed? || title_previously_changed? || description_previously_changed? }
   after_rollback :reset_cache
   after_rollback :discard_cache
   after_initialize :init
@@ -83,7 +86,7 @@ class Project < ApplicationRecord
   has_many :target_of_bs_request_actions, class_name: 'BsRequestAction', foreign_key: 'target_project_id'
   has_many :target_of_bs_requests, through: :target_of_bs_request_actions, source: :bs_request
 
-  has_one :staging, class_name: 'Staging::Workflow', inverse_of: :project
+  has_one :staging, class_name: 'Staging::Workflow', inverse_of: :project, dependent: :destroy
 
   default_scope { where('projects.id not in (?)', Relationship.forbidden_project_ids) }
 
@@ -106,6 +109,11 @@ class Project < ApplicationRecord
 
   scope :for_user, ->(user_id) { joins(:relationships).where(relationships: { user_id: user_id, role_id: Role.hashed['maintainer'] }) }
   scope :for_group, ->(group_id) { joins(:relationships).where(relationships: { group_id: group_id, role_id: Role.hashed['maintainer'] }) }
+  scope :very_important_projects_with_attributes, lambda {
+    joins(attribs: { attrib_type: :attrib_namespace })
+      .where(attrib_namespaces: { name: 'OBS' },
+             attrib_types: { name: 'VeryImportantProject' })
+  }
 
   validates :name, presence: true, length: { maximum: 200 }, uniqueness: true
   validates :title, length: { maximum: 250 }
@@ -529,8 +537,8 @@ class Project < ApplicationRecord
   def check_weak_dependencies?
     begin
       check_weak_dependencies!
-    rescue DeleteError
-      false
+    rescue DeleteError, Package::Errors::DeleteError
+      return false
     end
     # Get all my repositories and linking_repositories and check if I can modify the
     # associated projects
@@ -692,8 +700,6 @@ class Project < ApplicationRecord
     "<project name='#{::Builder::XChar.encode(name)}'/>\n"
   end
 
-  define_method :get_flags, GetFlags.instance_method(:get_flags)
-
   def can_be_released_to_project?(target_project)
     # is this package source going to a project which is specified as release target ?
     repositories.includes(:release_targets).each do |repo|
@@ -760,11 +766,7 @@ class Project < ApplicationRecord
   end
 
   def expand_all_repositories
-    all_repositories = repositories.to_a
-    repositories.each do |repository|
-      all_repositories.concat(repository.expand_all_repositories)
-    end
-    all_repositories.uniq
+    repositories.collect(&:expand_all_repositories).flatten.uniq
   end
 
   def expand_linking_to
@@ -793,15 +795,7 @@ class Project < ApplicationRecord
   end
 
   def expand_maintained_projects
-    projects = []
-
-    maintained_projects.each do |mp|
-      mp.project.expand_all_projects(allow_remote_projects: false).each do |p|
-        projects << p
-      end
-    end
-
-    projects
+    maintained_projects.collect { |mp| mp.project.expand_all_projects(allow_remote_projects: false) }.flatten
   end
 
   # return array of [:name, :project_id] tuples
@@ -1079,39 +1073,6 @@ class Project < ApplicationRecord
     tocheck_repos.flatten!
     tocheck_repos.uniq
   end
-
-  # called either directly or from delayed job
-  def do_project_copy(params)
-    User.find_by!(login: params[:user]).run_as do
-      check_write_access!
-
-      # copy entire project in the backend
-      begin
-        path = "/source/#{URI.escape(name)}"
-        path << Backend::Connection.build_query_from_hash(params,
-                                                          [:cmd, :user, :comment, :oproject, :withbinaries, :withhistory,
-                                                           :makeolder, :makeoriginolder, :noservice])
-        Backend::Connection.post path
-      rescue Backend::Error => e
-        logger.debug "copy failed: #{e.summary}"
-        # we need to check results of backend in any case (also timeout error eg)
-      end
-      _update_backend_packages
-    end
-  end
-
-  def _update_backend_packages
-    # restore all package meta data objects in DB
-    backend_pkgs = Xmlhash.parse(Backend::Api::Search.packages_for_project(name))
-    backend_pkgs.elements('package') do |package|
-      pname = package['name']
-      p = packages.where(name: pname).first_or_initialize
-      p.update_from_xml(Xmlhash.parse(Backend::Api::Sources::Package.meta(name, pname)))
-      p.save! # do not store
-    end
-    all_sources_changed
-  end
-  private :_update_backend_packages
 
   def all_sources_changed
     packages.each do |p|
@@ -1566,6 +1527,27 @@ class Project < ApplicationRecord
 
   def missing_checks
     @missing_checks ||= calculate_missing_checks
+  end
+
+  # This is not what makes a Package a branch, we only use this to prefill the submit request
+  # dialog in the UI. Please do not rely on this!
+  def branch?
+    name.include?(':branches:') # Rather ugly decision finding...
+  end
+
+  def categories
+    AttribValue
+      .joins(attrib: { attrib_type: :attrib_namespace })
+      .where(attribs: { project: self },
+             attrib_types: { name: 'QualityCategory' },
+             attrib_namespaces: { name: 'OBS' })
+      .map(&:value)
+  end
+
+  def self.very_important_projects_with_categories
+    very_important_projects_with_attributes.map do |p|
+      [p.name, p.title, p.categories]
+    end
   end
 
   private

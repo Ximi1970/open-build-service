@@ -1,11 +1,7 @@
 module Webui
   module Staging
     class ExcludedRequestsController < WebuiController
-      layout 'webui2/webui'
-
       before_action :require_login, except: [:index]
-      # NOTE: remove when bootstrap migration is done (related to switch_to_webui2)
-      before_action :set_webui2_views
       before_action :set_staging_workflow
       before_action :set_project
       before_action :set_request_exclusion, only: [:destroy]
@@ -30,6 +26,11 @@ module Webui
         request = @staging_workflow.target_of_bs_requests.find_by(number: staging_request_exclusion[:number])
         unless request
           redirect_back(fallback_location: root_path, error: "Request #{params[:number]} doesn't exist or it doesn't belong to this project")
+          return
+        end
+        if request.staging_project
+          redirect_back(fallback_location: root_path,
+                        error: "Request #{params[:number]} could not be excluded because is staged in: #{request.staging_project}")
           return
         end
 

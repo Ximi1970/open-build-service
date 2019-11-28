@@ -13,6 +13,8 @@ class Package < ApplicationRecord
   include Package::Errors
   include HasRatings
   include HasAttributes
+  include PopulateSphinx
+  include PackageSphinx
 
   BINARY_EXTENSIONS = ['.0', '.bin', '.bin_mid', '.bz', '.bz2', '.ccf', '.cert',
                        '.chk', '.der', '.dll', '.exe', '.fw', '.gem', '.gif', '.gz',
@@ -67,6 +69,7 @@ class Package < ApplicationRecord
   before_destroy :remove_devel_packages
 
   after_save :write_to_backend
+  after_save :populate_sphinx, if: -> { name_previously_changed? || title_previously_changed? || description_previously_changed? }
   before_update :update_activity
   after_rollback :reset_cache
 
@@ -723,12 +726,11 @@ class Package < ApplicationRecord
         # Take project wide devel project definitions into account
         prj = pkg.project.develproject
         prj_name = prj.name
-        pkg = prj.packages.get_by_name(pkg.name)
+        pkg = prj.packages.find_by(name: pkg.name)
         return if pkg.nil?
       end
       pkg = self if pkg.id == id
     end
-    # logger.debug "WORKED - #{pkg.inspect}"
     pkg
   end
 
@@ -869,8 +871,6 @@ class Package < ApplicationRecord
     activity_index * 2.3276**((updated_at_was.to_f - Time.now.to_f) / 10_000_000)
   end
 
-  define_method :get_flags, GetFlags.instance_method(:get_flags)
-
   def open_requests_with_package_as_source_or_target
     rel = BsRequest.where(state: [:new, :review, :declined]).joins(:bs_request_actions)
     # rubocop:disable Metrics/LineLength
@@ -915,9 +915,9 @@ class Package < ApplicationRecord
   end
 
   # FIXME: That you can overwrite package_name is rather confusing, but needed because of multibuild :-/
-  def jobhistory(repository_name:, arch_name:, package_name: nil, filter: { limit: 100, start_epoch: nil, end_epoch: nil, code: [] })
-    Backend::Api::BuildResults::JobHistory.for_package(project_name: project,
-                                                       package_name: package_name.presence ? package_name : name,
+  def jobhistory(repository_name:, arch_name:, package_name: name, project_name: project.name, filter: { limit: 100, start_epoch: nil, end_epoch: nil, code: [] })
+    Backend::Api::BuildResults::JobHistory.for_package(project_name: project_name,
+                                                       package_name: package_name,
                                                        repository_name: repository_name,
                                                        arch_name: arch_name,
                                                        filter: filter)
@@ -1071,7 +1071,7 @@ class Package < ApplicationRecord
     return false if name == '0'
     return true if ['_product', '_pattern', '_project', '_patchinfo'].include?(name)
     # _patchinfo: is obsolete, just for backward compatibility
-    allowed_characters = /[-+\w\.#{ allow_multibuild ? ':' : '' }]/
+    allowed_characters = /[-+\w\.#{allow_multibuild ? ':' : ''}]/
     reg_exp = /\A([a-zA-Z0-9]|(_product:|_patchinfo:)\w)#{allowed_characters}*\z/
     reg_exp.match?(name)
   end
@@ -1521,4 +1521,3 @@ end
 #  fk_rails_...     (kiwi_image_id => kiwi_images.id)
 #  packages_ibfk_3  (develpackage_id => packages.id)
 #  packages_ibfk_4  (project_id => projects.id)
-#

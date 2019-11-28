@@ -1,6 +1,6 @@
 require 'browser_helper'
 
-RSpec.feature 'Requests', type: :feature, js: true do
+RSpec.feature 'Bootstrap_Requests', type: :feature, js: true, vcr: true do
   let(:submitter) { create(:confirmed_user, :with_home, login: 'kugelblitz') }
   let(:receiver) { create(:confirmed_user, :with_home, login: 'titan') }
   let(:target_project) { receiver.home_project }
@@ -9,41 +9,52 @@ RSpec.feature 'Requests', type: :feature, js: true do
   let(:source_package) { create(:package, name: 'ball', project_id: source_project.id) }
   let(:bs_request) { create(:delete_bs_request, target_project: target_project, description: 'a long text - ' * 200, creator: submitter) }
 
-  before do
-    skip_if_bootstrap
-  end
-
   RSpec.shared_examples 'expandable element' do
     scenario 'expanding a text field' do
-      invalid_word_count = valid_word_count + 1
-
       visit request_show_path(bs_request)
       within(element) do
-        expect(page).to have_text('a long text - ' * valid_word_count)
-        expect(page).not_to have_text('a long text - ' * invalid_word_count)
-
-        click_link('[+]')
-        expect(page).to have_text('a long text - ' * 200)
-
-        click_link('[-]')
-        expect(page).to have_text('a long text - ' * valid_word_count)
-        expect(page).not_to have_text('a long text - ' * invalid_word_count)
+        find('.show-content').click
+        expect(page).to have_css('div.expanded')
+        find('.show-content').click
+        expect(page).to have_no_css('div.expanded')
       end
     end
   end
 
   context 'request show page' do
+    let!(:superseded_bs_request) { create(:superseded_bs_request, superseded_by_request: bs_request) }
+    let!(:comment_1) { create(:comment, commentable: bs_request) }
+    let!(:comment_2) { create(:comment, commentable: superseded_bs_request) }
+
+    scenario 'show request comments' do
+      visit request_show_path(bs_request)
+      expect(page).to have_text(comment_1.body)
+      expect(page).not_to have_text(comment_2.body)
+      find('a', text: "Comments for request #{superseded_bs_request.number}").click
+      expect(page).to have_text(comment_2.body)
+      expect(page).not_to have_text(comment_1.body)
+    end
+
     describe 'request description field' do
+      scenario 'superseded requests' do
+        visit request_show_path(bs_request)
+        within 'li', text: "Supersedes #{superseded_bs_request.number}" do
+          find('a', text: superseded_bs_request.number).click
+        end
+        expect(page).to have_text('In state superseded')
+        within 'li', text: "Superseded by #{bs_request.number}" do
+          find('a', text: bs_request.number)
+        end
+      end
+
       it_behaves_like 'expandable element' do
-        let(:element) { 'pre#description-text' }
-        let(:valid_word_count) { 21 }
+        let(:element) { '#description-text' }
       end
     end
 
     describe 'request history entries' do
       it_behaves_like 'expandable element' do
-        let(:element) { '.expandable_event_comment' }
-        let(:valid_word_count) { 3 }
+        let(:element) { '.media-body .obs-collapsible-textbox' }
       end
     end
   end
@@ -57,7 +68,7 @@ RSpec.feature 'Requests', type: :feature, js: true do
         find(:id, 'role').select('Bugowner')
         fill_in 'description', with: 'I can fix bugs too.'
 
-        expect { click_button('Accept') }.to change(BsRequest, :count).by(1)
+        expect { click_button('Create') }.to change(BsRequest, :count).by(1)
         expect(page).to have_text("#{submitter.realname} (#{submitter.login}) wants to get the role bugowner for project #{target_project}")
         expect(page).to have_css('#description-text', text: 'I can fix bugs too.')
         expect(page).to have_text('In state new')
@@ -88,11 +99,10 @@ RSpec.feature 'Requests', type: :feature, js: true do
         login submitter
         visit package_show_path(project: target_project, package: target_package)
         click_link 'Request role addition'
-        find(:id, 'role').select('Maintainer')
-        fill_in 'description', with: 'I can produce bugs too.'
-
-        within('#dialog_wrapper .dialog-buttons') do
-          expect { click_button('Accept') }.to change(BsRequest, :count).by(1)
+        within('#add-role-modal') do
+          find(:id, 'role').select('Maintainer')
+          fill_in 'description', with: 'I can produce bugs too.'
+          expect { click_button('Create') }.to change(BsRequest, :count).by(1)
         end
         expect(page).to have_text("#{submitter.realname} (#{submitter.login}) wants to get the role maintainer " \
                                   "for package #{target_project} / #{target_package}")
@@ -118,10 +128,10 @@ RSpec.feature 'Requests', type: :feature, js: true do
       it 'opens a review and accepts it' do
         login submitter
         visit request_show_path(bs_request)
-        click_link 'Add a review'
+        click_link 'Add a Review'
         find(:id, 'review_type').select('User')
         fill_in 'review_user', with: reviewer.login
-        expect(page).to have_text('1 result is available')
+        fill_in 'Comment for reviewer:', with: 'Please review'
         click_button('Accept')
         expect(page).to have_text(/Open review for\s+#{reviewer.login}/)
         expect(page).to have_text('Request 1 (review)')
@@ -130,9 +140,11 @@ RSpec.feature 'Requests', type: :feature, js: true do
 
         login reviewer
         visit request_show_path(1)
-        click_link('review_descision_link_0')
-        fill_in 'comment', with: 'Ok for the project'
-        click_button 'Approve'
+        click_link("Review for #{reviewer}")
+        within '#review-0' do
+          fill_in 'comment', with: 'Ok for the project'
+          click_button 'Approve'
+        end
         expect(page).to have_text('Ok for the project')
         expect(Review.first.state).to eq(:accepted)
         expect(BsRequest.first.state).to eq(:new)
@@ -144,10 +156,9 @@ RSpec.feature 'Requests', type: :feature, js: true do
       it 'opens a review' do
         login submitter
         visit request_show_path(bs_request)
-        click_link 'Add a review'
+        click_link 'Add a Review'
         find(:id, 'review_type').select('Group')
         fill_in 'review_group', with: review_group.title
-        expect(page).to have_text('1 result is available')
         click_button('Accept')
         expect(page).to have_text("Open review for #{review_group.title}")
       end
@@ -157,12 +168,11 @@ RSpec.feature 'Requests', type: :feature, js: true do
       it 'opens a review' do
         login submitter
         visit request_show_path(bs_request)
-        click_link 'Add a review'
+        click_link 'Add a Review'
         find(:id, 'review_type').select('Project')
         fill_in 'review_project', with: submitter.home_project
-        expect(page).to have_text('1 result is available')
         click_button('Accept')
-        expect(page).to have_text("Review for #{submitter.home_project}")
+        expect(page).to have_text("Open review for #{submitter.home_project}")
       end
     end
 
@@ -171,13 +181,12 @@ RSpec.feature 'Requests', type: :feature, js: true do
       it 'opens a review' do
         login submitter
         visit request_show_path(bs_request)
-        click_link 'Add a review'
+        click_link 'Add a Review'
         find(:id, 'review_type').select('Package')
         fill_in 'review_project', with: submitter.home_project
         fill_in 'review_package', with: package.name
-        expect(page).to have_text('1 result is available')
         click_button('Accept')
-        expect(page).to have_text("Review for #{submitter.home_project} / #{package.name}")
+        expect(page).to have_text("Open review for #{submitter.home_project} / #{package.name}")
       end
     end
 
@@ -185,11 +194,11 @@ RSpec.feature 'Requests', type: :feature, js: true do
       it 'opens no review' do
         login submitter
         visit request_show_path(bs_request)
-        click_link 'Add a review'
+        click_link 'Add a Review'
         find(:id, 'review_type').select('Project')
         fill_in 'review_project', with: 'INVALID/PROJECT'
         click_button('Accept')
-        expect(page).to have_css('#flash-messages', text: 'Unable add review to')
+        expect(page).to have_css('#flash', text: 'Unable add review to')
       end
     end
 
@@ -207,23 +216,24 @@ RSpec.feature 'Requests', type: :feature, js: true do
           create(:review, by_group: review_group, bs_request: bs_request)
         end
 
-        it 'renders the review tab' do
+        it 'does not show any request reason' do
           login reviewer
           visit request_show_path(bs_request)
-          expect(find('#review_descision_display_0')).not_to have_text('requested:')
+          expect(find('#review-0')).not_to have_text('requested:')
         end
       end
 
       context 'for manual reviews' do
         before do
-          create(:review, by_group: review_group, bs_request: bs_request,
-                          creator: receiver, reason: 'Does this make sense?')
+          create(:review, by_group: review_group, bs_request: bs_request, creator: receiver, reason: 'Does this make sense?')
         end
 
-        it 'renders the review tab' do
+        it 'shows request reason' do
           login reviewer
           visit request_show_path(bs_request)
-          expect(find('#review_descision_display_0')).to have_text("#{receiver.login} requested:\nDoes this make sense?")
+          within '#review-0' do
+            expect(page).to have_text("#{receiver.realname} (#{receiver.login}) requested:\nDoes this make sense?")
+          end
         end
       end
     end

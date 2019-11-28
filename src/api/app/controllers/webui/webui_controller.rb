@@ -4,7 +4,7 @@
 require_dependency 'authenticator'
 
 class Webui::WebuiController < ActionController::Base
-  layout :choose_layout
+  layout 'webui/webui'
 
   helper_method :valid_xml_id
 
@@ -21,7 +21,6 @@ class Webui::WebuiController < ActionController::Base
   before_action :set_influxdb_additional_tags
   before_action :require_configuration
   before_action :set_pending_announcement
-  before_action :check_ajax, only: :render_dialog
   after_action :clean_cache
 
   # :notice and :alert are default, we add :success and :error
@@ -82,6 +81,14 @@ class Webui::WebuiController < ActionController::Base
     CGI.escapeHTML(rawid.gsub(/[+&: .\/\~\(\)@#]/, '_'))
   end
 
+  def home
+    if params[:login].present?
+      redirect_to user_path(params[:login])
+    else
+      redirect_to user_path(User.possibly_nobody)
+    end
+  end
+
   protected
 
   # We execute both strategies here. The default rails strategy (resetting the session)
@@ -107,7 +114,7 @@ class Webui::WebuiController < ActionController::Base
         flash[:error] = 'Please login to access the requested page.'
         mode = CONFIG['proxy_auth_mode'] || :off
         if mode == :off
-          redirect_to session_new_path
+          redirect_to new_session_path
         else
           redirect_to root_path
         end
@@ -177,8 +184,9 @@ class Webui::WebuiController < ActionController::Base
       User.session = user_checker.find_or_create_user!
 
       if User.session!.is_active?
-        User.session!.update_user_info_from_proxy_env(request.env)
+        User.session!.update_login_values(request.env)
       else
+        User.session!.count_login_failure
         session[:login] = nil
         User.session = User.find_nobody!
         send_login_information_rabbitmq(:disabled) if previous_user != User.possibly_nobody.login
@@ -198,14 +206,15 @@ class Webui::WebuiController < ActionController::Base
     end
   end
 
-  def check_display_user
-    if params['user'].present?
+  def check_displayed_user
+    param_login = params[:login] || params[:user_login]
+    if param_login.present?
       begin
-        @displayed_user = User.find_by_login!(params['user'])
+        @displayed_user = User.find_by_login!(param_login)
       rescue NotFoundError
         # admins can see deleted users
-        @displayed_user = User.find_by_login(params['user']) if User.admin_session?
-        redirect_back(fallback_location: root_path, error: "User not found #{params['user']}") unless @displayed_user
+        @displayed_user = User.find_by_login(param_login) if User.admin_session?
+        redirect_back(fallback_location: root_path, error: "User not found #{param_login}") unless @displayed_user
       end
     else
       @displayed_user = User.possibly_nobody
@@ -244,14 +253,17 @@ class Webui::WebuiController < ActionController::Base
   private
 
   def send_login_information_rabbitmq(msg)
-    case msg
-    when :success
-      RabbitmqBus.send_to_bus('metrics', 'login,access_point=webui value=1')
-    when :disabled
-      RabbitmqBus.send_to_bus('metrics', 'login,access_point=webui,failure=disabled value=1')
-    when :unauthenticated
-      RabbitmqBus.send_to_bus('metrics', 'login,access_point=webui,failure=unauthenticated value=1')
+    message = case msg
+              when :success
+                'login,access_point=webui value=1'
+              when :disabled
+                'login,access_point=webui,failure=disabled value=1'
+              when :logout
+                'logout,access_point=webui value=1'
+              when :unauthenticated
+                'login,access_point=webui,failure=unauthenticated value=1'
     end
+    RabbitmqBus.send_to_bus('metrics', message)
   end
 
   def authenticator
@@ -299,45 +311,6 @@ class Webui::WebuiController < ActionController::Base
     User.possibly_nobody
   end
 
-  # dialog_init is a function name called before dialog is shown
-  def render_dialog(dialog_init = nil, locals = {})
-    @dialog_html = ActionController::Base.helpers.escape_javascript(render_to_string(partial: action_name, locals: locals))
-    @dialog_init = dialog_init
-    render partial: 'dialog', content_type: 'application/javascript'
-  end
-
-  def switch_to_webui2?
-    if Rails.env.test?
-      # In test environment we want to enable the
-      # bootstrap theme independent from the user
-      # The feature switch depends on the user (e.g. Admin or Staff)
-      ENV['BOOTSTRAP'].present?
-    else
-      Flipper.enabled?(:bootstrap, User.possibly_nobody)
-    end
-  end
-
-  def choose_layout
-    @switch_to_webui2 ? 'webui2/webui' : 'webui/webui'
-  end
-
-  def ui_namespace
-    switch_to_webui2? ? 'webui2' : 'webui'
-  end
-
-  def switch_to_webui2
-    if switch_to_webui2?
-      @switch_to_webui2 = true
-
-      set_webui2_views
-
-      prefixed_action_name = "webui2_#{action_name}"
-      send(prefixed_action_name) if action_methods.include?(prefixed_action_name)
-      return true
-    end
-    @switch_to_webui2 = false
-  end
-
   def set_pending_announcement
     return if Announcement.last.in?(User.possibly_nobody.announcements)
     @pending_announcement = Announcement.last
@@ -365,8 +338,6 @@ class Webui::WebuiController < ActionController::Base
     InfluxDB::Rails.current.tags = {
       interface: :webui
     }
-
-    InfluxDB::Rails.current.values = { request: request.request_id }
   end
 
   def set_influxdb_additional_tags
@@ -376,10 +347,5 @@ class Webui::WebuiController < ActionController::Base
     }
 
     InfluxDB::Rails.current.tags = InfluxDB::Rails.current.tags.merge(tags)
-  end
-
-  # NOTE: remove when bootstrap migration is done (related to switch_to_webui2)
-  def set_webui2_views
-    prepend_view_path('app/views/webui2')
   end
 end

@@ -48,7 +48,7 @@ RSpec.describe Staging::WorkflowsController do
         post :create, params: { staging_workflow_project: project, format: :xml }
       end
 
-      it { expect(response).to have_http_status(:not_found) }
+      it { expect(response).to have_http_status(:bad_request) }
       it { expect(project.staging).to be_nil }
     end
   end
@@ -63,6 +63,19 @@ RSpec.describe Staging::WorkflowsController do
 
       it { expect(response).to have_http_status(:success) }
       it { expect(project.reload.staging).to be_nil }
+    end
+
+    context 'delete staging projects of a staging workflow by passing the "with_staging_projects" param' do
+      let!(:staging_projects) { staging_workflow.staging_projects.map(&:name) }
+
+      before do
+        login user
+        delete :destroy, params: { staging_workflow_project: project, with_staging_projects: 1, format: :xml }
+      end
+
+      it { expect(response).to have_http_status(:success) }
+      it { expect(project.reload.staging).to be_nil }
+      it { expect(Project.exists?(name: staging_projects)).to be false }
     end
 
     context 'with invalid user' do

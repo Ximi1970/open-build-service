@@ -3,22 +3,17 @@ module Webui
     class UploadJobsController < WebuiController
       before_action :require_login
       before_action :validate_configuration_presence
-      before_action :set_breadcrump
       before_action :validate_uploadable, only: [:new]
       before_action :set_package, only: :new
       before_action :set_upload_job, only: :destroy
 
       def index
-        switch_to_webui2
         @upload_jobs = ::Cloud::Backend::UploadJob.all(User.session!)
-        @crumb_list.push << 'Overview'
       end
 
       def new
-        @crumb_list.push << 'Choose your Cloud'
         @user_ec2_configured = User.session!.ec2_configuration.present?
         @user_azure_configured = User.session!.azure_configuration.present?
-        switch_to_webui2
       end
 
       def create
@@ -45,10 +40,6 @@ module Webui
       end
 
       private
-
-      def set_breadcrump
-        @crumb_list = [WebuiController.helpers.link_to('Cloud Upload', cloud_upload_index_path)]
-      end
 
       def validate_uploadable
         return if ::Cloud::UploadJob.new(filename: params[:filename], arch: params[:arch]).uploadable?

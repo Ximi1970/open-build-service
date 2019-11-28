@@ -3,9 +3,6 @@ class Webui::SubscriptionsController < Webui::WebuiController
 
   def index
     @subscriptions_form = subscriptions_form
-
-    # TODO: Remove the statement after migration is finished
-    switch_to_webui2
   end
 
   def update
@@ -16,7 +13,7 @@ class Webui::SubscriptionsController < Webui::WebuiController
   ensure
     respond_to do |format|
       format.html { redirect_to action: :index }
-      format.js { render 'webui2/webui/subscriptions/update' }
+      format.js { render 'webui/subscriptions/update' }
     end
   end
 

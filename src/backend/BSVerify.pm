@@ -89,6 +89,16 @@ sub verify_packid_repository {
   verify_packid($_[0]) unless $_[0] && $_[0] eq '_repository';
 }
 
+sub verify_packid_repositorybuild {
+  my ($packid) = $_[0];
+  if ($packid =~ /\A_repository:([^:]+)\z/s) {
+    my $p2 = $1;
+    die("packid '$packid' is illegal\n") unless $p2 =~ /\A[^_\.\/:\000-\037][^\/:\000-\037]*\z/;
+    return;
+  }
+  verify_packid_repository($packid);
+}
+
 sub verify_service {
   my $p = $_[0];
   verify_filename($p->{'name'}) if defined($p->{'name'});
@@ -101,7 +111,7 @@ sub verify_patchinfo {
   # This verifies the absolute minimum required content of a patchinfo file
   my $p = $_[0];
   verify_filename($p->{'name'}) if defined($p->{'name'});
-  my %allowed_categories = map {$_ => 1} qw{security recommended optional feature};
+  my %allowed_categories = map {$_ => 1} qw{security recommended optional feature ptf};
   die("Invalid category defined in _patchinfo\n") if defined($p->{'category'}) && !$allowed_categories{$p->{'category'}};
   for my $rt (@{$p->{'releasetarget'} || []}) {
     verify_projid($rt->{'project'});
@@ -352,6 +362,7 @@ sub verify_aggregatelist {
       die("'nosources' element must be empty\n") if $a->{'nosources'} ne '';
     }
     for my $p (@{$a->{'package'} || []}) {
+      next if ($p || '') eq '_repository';
       verify_packid($p);
     }
     for my $b (@{$a->{'binary'} || []}) {
@@ -535,6 +546,9 @@ sub verify_multibuild {
   }
 }
 
+sub verify_module {
+}
+
 our $verifiers = {
   'project' => \&verify_projid,
   'package' => \&verify_packid,
@@ -542,6 +556,7 @@ our $verifiers = {
   'arch' => \&verify_arch,
   'job' => \&verify_jobid,
   'package_repository' => \&verify_packid_repository,
+  'package_repositorybuild' => \&verify_packid_repositorybuild,
   'filename' => \&verify_filename,
   'md5' => \&verify_md5,
   'srcmd5' => \&verify_srcmd5,
@@ -558,6 +573,7 @@ our $verifiers = {
   'workerid' => \&verify_workerid,
   'regrepo' => \&verify_regrepo,
   'regtag' => \&verify_regtag,
+  'module' => \&verify_module,
 };
 
 1;

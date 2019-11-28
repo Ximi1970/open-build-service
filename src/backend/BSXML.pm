@@ -257,6 +257,7 @@ our $patchinfo = [
             'message',  # optional pop-up message
             'swampid',	# obsolete
             'packager',
+            'retracted',
             'stopped',
             'zypp_restart_needed',
             'reboot_needed',
@@ -594,6 +595,7 @@ our $buildinfo = [
 	'followupfile',	# for two-stage builds
 	'masterdispatched',	# dispatched through a master dispatcher
 	'nounchanged',	# do not check for "unchanged" builds
+      [ 'module' ],	# list of modules to use
 
       [ 'preinstallimage' =>
 	    'project',

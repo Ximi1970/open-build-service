@@ -7,32 +7,21 @@ class Webui::RequestController < Webui::WebuiController
 
   before_action :require_request, only: [:changerequest, :show]
 
-  before_action :set_project, only: [:change_devel_request_dialog]
-
   before_action :set_superseded_request, only: :show
 
   before_action :check_ajax, only: :sourcediff
 
-  def add_reviewer_dialog
-    @request_number = params[:number]
-    render_dialog('requestAddReviewAutocomplete')
-  end
-
   def add_reviewer
     begin
       opts = {}
-      # bento_only
-      # user, group, project, package are bento only
-      # and should be removed as soon the Bootstrap
-      # migration is finished
       case params[:review_type]
-      when 'review-user', 'user'
+      when 'review-user'
         opts[:by_user] = params[:review_user]
-      when 'review-group', 'group'
+      when 'review-group'
         opts[:by_group] = params[:review_group]
-      when 'review-project', 'project'
+      when 'review-project'
         opts[:by_project] = params[:review_project]
-      when 'review-package', 'package'
+      when 'review-package'
         opts[:by_project] = params[:review_project]
         opts[:by_package] = params[:review_package]
       end
@@ -49,12 +38,7 @@ class Webui::RequestController < Webui::WebuiController
   end
 
   def modify_review_set_request
-    review_params = params.slice(:comment, :by_user, :by_group, :by_project, :by_package, :review_id)
-    unless review_params[:review_id]
-      # TODO: bento_only
-      # bootstrap passes only review_id - the others can go once bento is dropped
-      return review_params, BsRequest.find_by_number(params[:request_number])
-    end
+    review_params = params.slice(:comment, :review_id)
     review = Review.find_by(id: review_params[:review_id])
     unless review
       flash[:error] = 'Unable to load review'
@@ -71,7 +55,7 @@ class Webui::RequestController < Webui::WebuiController
     review_params, request = modify_review_set_request
     if request.nil?
       flash[:error] = 'Unable to load request'
-      redirect_back(fallback_location: user_show_path(User.session!))
+      redirect_back(fallback_location: user_path(User.session!))
       return
     elsif !new_state.in?(['accepted', 'declined'])
       flash[:error] = 'Unknown state to set'
@@ -109,7 +93,6 @@ class Webui::RequestController < Webui::WebuiController
     @comments = @bs_request.comments
     @comment = Comment.new
 
-    switch_to_webui2
     @actions = @bs_request.webui_actions(filelimit: diff_limit, tarlimit: diff_limit, diff_to_superseded: @diff_to_superseded, diffs: true)
     # print a hint that the diff is not fully shown (this only needs to be verified for submit actions)
     @not_full_diff = BsRequest.truncated_diffs?(@actions)
@@ -121,10 +104,10 @@ class Webui::RequestController < Webui::WebuiController
   end
 
   def sourcediff
-    render partial: 'shared/editor', locals: { text: params[:text],
-                                               mode: 'diff', style: { read_only: true },
-                                               height: 'auto', width: '750px',
-                                               no_border: true, uid: params[:uid] }
+    render partial: 'webui/shared/editor', locals: { text: params[:text],
+                                                     mode: 'diff', style: { read_only: true },
+                                                     height: 'auto', width: '750px',
+                                                     no_border: true, uid: params[:uid] }
   end
 
   def changerequest
@@ -159,16 +142,9 @@ class Webui::RequestController < Webui::WebuiController
   end
 
   def list_small
-    redirect_to(user_show_path(User.possibly_nobody)) && return unless request.xhr? # non ajax request
+    redirect_to(user_path(User.possibly_nobody)) && return unless request.xhr? # non ajax request
     requests = BsRequest.list(params)
-    switch_to_webui2
     render partial: 'requests_small', locals: { requests: requests }
-  end
-
-  def delete_request_dialog
-    @project = params[:project]
-    @package = params[:package] if params[:package]
-    render_dialog
   end
 
   def delete_request
@@ -191,12 +167,6 @@ class Webui::RequestController < Webui::WebuiController
     redirect_to request_show_path(number: request.number)
   end
 
-  def add_role_request_dialog
-    @project = params[:project]
-    @package = params[:package] if params[:package]
-    render_dialog
-  end
-
   def add_role_request
     request = nil
     begin
@@ -209,11 +179,6 @@ class Webui::RequestController < Webui::WebuiController
       redirect_to(controller: :project, action: :show, project: params[:project]) && return
     end
     redirect_to controller: :request, action: :show, number: request.number
-  end
-
-  # TODO: bento_only
-  def set_bugowner_request_dialog
-    render_dialog
   end
 
   def set_bugowner_request
@@ -229,17 +194,6 @@ class Webui::RequestController < Webui::WebuiController
       redirect_to(controller: :project, action: :show, project: params[:project]) && return
     end
     redirect_to controller: :request, action: :show, number: request.number
-  end
-
-  # TODO: bento_only
-  def change_devel_request_dialog
-    @package = Package.find_by_project_and_name(params[:project], params[:package])
-    if @package.develpackage
-      @current_devel_package = @package.develpackage.name
-      @current_devel_project = @package.develpackage.project.name
-    end
-
-    render_dialog
   end
 
   def change_devel_request
@@ -260,10 +214,6 @@ class Webui::RequestController < Webui::WebuiController
       return
     end
     redirect_to request_show_path(number: request.number)
-  end
-
-  def set_incident_dialog
-    render_dialog
   end
 
   def set_incident

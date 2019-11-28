@@ -34,44 +34,6 @@ RSpec.describe Webui::ProjectController, vcr: true do
     end
   end
 
-  describe 'GET #index' do
-    context 'showing all projects' do
-      before do
-        allow(::Configuration).to receive(:unlisted_projects_filter) { '^home:.*' }
-        home_moi_project
-        another_project
-        get :index, params: { show_all: true }
-      end
-
-      it { expect(assigns(:projects).length).to eq(2) }
-      it { expect(Project.count).to eq(2) }
-      it { is_expected.to render_template('webui/project/list') }
-    end
-
-    context 'showing filtered projects' do
-      before do
-        allow(::Configuration).to receive(:unlisted_projects_filter) { '^home:.*' }
-        home_moi_project
-        another_project
-        get :index, params: { show_all: false }
-      end
-
-      it { expect(assigns(:projects).length).to eq(1) }
-      it { expect(Project.count).to eq(2) }
-      it { is_expected.to render_template('webui/project/list') }
-    end
-
-    context 'showing projects being a spider bot' do
-      before do
-        # be a fake google bot
-        request.env['HTTP_USER_AGENT'] = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
-        get :index
-      end
-
-      it { is_expected.to render_template('webui/project/list_simple') }
-    end
-  end
-
   describe 'PATCH #update' do
     let(:project) { user.home_project }
 
@@ -95,19 +57,11 @@ RSpec.describe Webui::ProjectController, vcr: true do
         project.reload
       end
 
-      it { expect(response).to have_http_status(:success) }
+      it { expect(response).to redirect_to(project_show_path(project)) }
       it { expect(flash[:error]).to eq('Failed to update project') }
       it { expect(project.title).to be(nil) }
       it { expect(project.description).to be(nil) }
     end
-  end
-
-  describe 'GET #remove_target_request_dialog' do
-    before do
-      get :remove_target_request_dialog, xhr: true
-    end
-
-    it { is_expected.to respond_with(:success) }
   end
 
   describe 'GET #autocomplete_projects' do
@@ -237,39 +191,6 @@ RSpec.describe Webui::ProjectController, vcr: true do
     it { expect(assigns(:roles)).to match_array(Role.local_roles) }
   end
 
-  describe 'GET #subprojects' do
-    before do
-      apache_project
-      @project = create(:project, name: 'Apache:Apache2')
-      @subproject1 = create(:project, name: 'Apache:Apache2:TestSubproject')
-      @subproject2 = create(:project, name: 'Apache:Apache2:TestSubproject2')
-    end
-
-    context 'subprojects' do
-      before do
-        get :subprojects, params: { project: @project }
-      end
-
-      it 'has subprojects' do
-        expect(assigns(:subprojects)).to match_array([@subproject1, @subproject2])
-        expect(assigns(:parentprojects)).to contain_exactly(apache_project)
-        expect(assigns(:siblings)).to be_empty
-      end
-    end
-
-    context 'siblingprojects' do
-      before do
-        get :subprojects, params: { project: @subproject1 }
-      end
-
-      it 'has siblingprojects' do
-        expect(assigns(:subprojects)).to be_empty
-        expect(assigns(:parentprojects)).to match_array([apache_project, @project])
-        expect(assigns(:siblings)).to contain_exactly(@subproject2)
-      end
-    end
-  end
-
   describe 'GET #new' do
     before do
       login user
@@ -393,43 +314,6 @@ RSpec.describe Webui::ProjectController, vcr: true do
     end
   end
 
-  describe 'GET #new_package_branch' do
-    it 'branches the package' do
-      login admin_user
-      @remote_projects_created = create_list(:remote_project, 3)
-      get :new_package_branch, params: { project: apache_project }
-      expect(assigns(:remote_projects)).to match_array(@remote_projects_created.map { |r| [r.id, r.name, r.title] })
-    end
-  end
-
-  describe 'GET #linking_projects' do
-    before do
-      login user
-      apache2_project
-      another_project.projects_linking_to << apache_project
-      get :linking_projects, params: { project: apache_project }, xhr: true
-    end
-
-    it { expect(Project.count).to eq(4) }
-    it { expect(assigns(:linking_projects)).to match_array([another_project.name]) }
-  end
-
-  describe 'GET #add_person' do
-    it 'assigns the local roles' do
-      login user
-      get :add_person, params: { project: user.home_project }
-      expect(response).to render_template('webui/project/add_person')
-    end
-  end
-
-  describe 'GET #add_group' do
-    it 'assigns the local roles' do
-      login user
-      get :add_group, params: { project: user.home_project }
-      expect(response).to render_template('webui/project/add_group')
-    end
-  end
-
   describe 'GET #buildresult' do
     let(:summary) { Xmlhash::XMLHash.new('statuscount' => { 'code' => 'succeeded', 'count' => '1' }) }
     let(:build_result) do
@@ -456,15 +340,6 @@ RSpec.describe Webui::ProjectController, vcr: true do
     it { expect(assigns(:project).buildresults).to have_key('openSUSE') }
     it { expect(local_build_result).to have_attributes(result) }
     it { expect(status_count).to have_attributes(code: 'succeeded', count: '1') }
-  end
-
-  describe 'GET #delete_dialog' do
-    it 'assigns only linking_projects' do
-      apache2_project
-      another_project.projects_linking_to << apache_project
-      get :delete_dialog, params: { project: apache_project }, xhr: true
-      expect(assigns(:linking_projects)).to match_array([another_project.name])
-    end
   end
 
   describe 'DELETE #destroy' do
@@ -538,6 +413,7 @@ RSpec.describe Webui::ProjectController, vcr: true do
       end
 
       it { expect(assigns(:project).name).to eq("#{user.home_project_name}:my_project") }
+
       it_should_behave_like 'a valid project saved'
     end
 
@@ -547,6 +423,7 @@ RSpec.describe Webui::ProjectController, vcr: true do
       end
 
       it { expect(assigns(:project).kind).to eq('maintenance') }
+
       it_should_behave_like 'a valid project saved'
     end
 
@@ -558,6 +435,7 @@ RSpec.describe Webui::ProjectController, vcr: true do
 
         it { expect(assigns(:project).flags.first.flag).to eq(flag_name) }
         it { expect(assigns(:project).flags.find_by(flag: flag_name).status).to eq('disable') }
+
         it_should_behave_like 'a valid project saved'
       end
 
@@ -573,32 +451,6 @@ RSpec.describe Webui::ProjectController, vcr: true do
 
       it { expect(flash[:error]).to start_with('Failed to save project') }
       it { is_expected.to redirect_to(root_url) }
-    end
-  end
-
-  describe 'PATCH #update' do
-    before do
-      login user
-    end
-
-    context 'with valid data' do
-      before do
-        patch :update, params: { id: user.home_project.id, project: { title: 'New Title' } }
-      end
-
-      it { expect(assigns(:project).title).to eq('New Title') }
-      it { expect(flash[:success]).to eq('Project was successfully updated.') }
-      it { is_expected.to redirect_to(project_show_path(user.home_project)) }
-    end
-
-    context 'with no valid data' do
-      before do
-        patch :update, params: { id: user.home_project.id, project: { name: 'non valid name' } }
-      end
-
-      it { expect(flash[:error]).to eq('Failed to update project') }
-      it { is_expected.to render_template('webui/project/edit') }
-      it { expect(response).to have_http_status(:success) }
     end
   end
 
@@ -636,6 +488,7 @@ RSpec.describe Webui::ProjectController, vcr: true do
         expect(flash[:success]).to eq("Created <a href='http://test.host/request/show/#{BsRequest.last.number}'>repository delete " \
                                       "request #{BsRequest.last.number}</a>")
       end
+
       it { is_expected.to redirect_to(controller: :request, action: :show, number: BsRequest.last.number) }
     end
   end
@@ -735,6 +588,7 @@ RSpec.describe Webui::ProjectController, vcr: true do
         end
 
         it { is_expected.to redirect_to(action: :show, project: user.home_project) }
+
         it do
           expect(flash[:error]).to eq("Project can't be unlocked: Unlock of maintenance incident #{user.home_project.name} is not possible," \
                                             " because there is a running release request: #{bs_request.id}")
@@ -751,98 +605,6 @@ RSpec.describe Webui::ProjectController, vcr: true do
         it { is_expected.to redirect_to(action: :show, project: user.home_project) }
         it { expect(flash[:error]).to eq("Project can't be unlocked: is not locked") }
       end
-    end
-  end
-
-  describe 'POST #remove_maintained_project' do
-    before do
-      login user
-    end
-
-    context 'with maintained kind' do
-      before do
-        user.home_project.update(kind: 'maintenance')
-      end
-
-      context 'maintained project successfully removed' do
-        let(:maintained_project) { create(:maintained_project, project: user.home_project) }
-
-        before do
-          post :remove_maintained_project, params: { project: user.home_project, maintained_project: maintained_project.project.name }
-        end
-
-        it { expect(user.home_project.maintained_projects.where(project: user.home_project)).not_to exist }
-        it { expect(flash[:success]).to eq("Removed #{maintained_project.project.name} from maintenance") }
-        it { is_expected.to redirect_to(action: 'maintained_projects', project: user.home_project) }
-      end
-
-      context 'with an invalid maintained project' do
-        before do
-          request.env['HTTP_REFERER'] = root_url # Needed for the redirect_to :back
-          post :remove_maintained_project, params: { project: user.home_project, maintained_project: user.home_project.name }
-        end
-
-        it { expect(flash[:error]).to eq("Failed to remove #{user.home_project.name} from maintenance") }
-        it { is_expected.to redirect_to(root_url) }
-      end
-
-      # raise the exception in the before_action set_maintained_project
-      it '#remove_maintained_project raise excepction with invalid maintained project' do
-        expect do
-          post :remove_maintained_project, params: { project: user.home_project, maintained_project: 'invalid' }
-        end.to raise_exception ActiveRecord::RecordNotFound
-      end
-    end
-
-    context '#remove_maintained_project fails without maintenance kind for a valid maintained project' do
-      let(:maintained_project) { create(:maintained_project, project: user.home_project) }
-
-      before do
-        post :remove_maintained_project, params: { project: user.home_project, maintained_project: maintained_project.project.name }
-      end
-
-      it { is_expected.to redirect_to(action: :show, project: user.home_project) }
-    end
-  end
-
-  describe 'POST #add_maintained_project' do
-    before do
-      login user
-    end
-
-    context "with a maintenance project (kind 'maintenance')" do
-      before do
-        user.home_project.update(kind: 'maintenance')
-      end
-
-      context 'adding a valid maintained project' do
-        before do
-          post :add_maintained_project, params: { project: user.home_project, maintained_project: user.home_project.name }
-        end
-
-        it { expect(user.home_project.maintained_projects.where(project: user.home_project)).to exist }
-        it { expect(flash[:success]).to eq("Added #{user.home_project.name} to maintenance") }
-        it { is_expected.to redirect_to(action: 'maintained_projects', project: user.home_project) }
-      end
-
-      context 'adding an invalid project' do
-        before do
-          post :add_maintained_project, params: { project: user.home_project, maintained_project: 'invalid project' }
-        end
-
-        it { expect(user.home_project.maintained_projects.where(project_id: user.home_project.id)).not_to exist }
-        it { expect(flash[:error]).to eq('Failed to add invalid project to maintenance') }
-        it { is_expected.to redirect_to(root_path) }
-      end
-    end
-
-    context "without a maintenance project (kind 'maintenance')" do
-      before do
-        post :add_maintained_project, params: { project: user.home_project, maintained_project: user.home_project.name }
-      end
-
-      it { expect(user.home_project.maintained_projects.where(project: user.home_project)).not_to exist }
-      it { is_expected.to redirect_to(action: :show, project: user.home_project) }
     end
   end
 
@@ -866,7 +628,7 @@ RSpec.describe Webui::ProjectController, vcr: true do
         post :edit_comment, params: { project: user.home_project, package: package, text: text, last_comment: 'Last comment', format: 'js' }
       end
 
-      it { expect(response).to redirect_to(session_new_path) }
+      it { expect(response).to redirect_to(new_session_path) }
     end
   end
 
@@ -894,7 +656,6 @@ RSpec.describe Webui::ProjectController, vcr: true do
       end
 
       it { expect(response).to have_http_status(:success) }
-      it { expect(response.body).to eq('<em>Cleared comments for packages</em>') }
       it { expect(package.attribs.where(attrib_type: attribute_type)).to be_empty }
     end
   end
@@ -1146,14 +907,17 @@ RSpec.describe Webui::ProjectController, vcr: true do
           it { expect(assigns(:packagenames)).to eq(['c++', 'redis']) }
           it { expect(assigns(:statushash)).to eq(statushash) }
           it { expect(assigns(:repoarray)).to eq([['openSUSE_42.2', ['s390x']], ['openSUSE_Tumbleweed', ['i586', 'x86_64']]]) }
+
           it {
             expect(assigns(:repostatushash)).to eq('openSUSE_Tumbleweed' => { 'i586' => 'published', 'x86_64' => 'building' },
                                                    'openSUSE_42.2' => { 's390x' => 'outdated_published' })
           }
+
           it {
             expect(assigns(:repostatusdetailshash)).to eq('openSUSE_Tumbleweed' => { 'x86_64' => 'This repo is broken' },
                                                           'openSUSE_42.2' => {})
           }
+
           it { expect(response).to have_http_status(:ok) }
         end
 
@@ -1195,81 +959,6 @@ RSpec.describe Webui::ProjectController, vcr: true do
     end
   end
 
-  describe 'GET #incident_request_dialog' do
-    let!(:repo) { create(:repository, project: user.home_project) }
-    let!(:release_target) { create(:release_target, repository: repo) }
-
-    before do
-      get :incident_request_dialog, params: { project: user.home_project }, xhr: true
-    end
-
-    it { expect(assigns[:releasetargets].count).to eq(1) }
-    it { expect(response).to have_http_status(:success) }
-  end
-
-  describe 'GET #release_request_dialog' do
-    before do
-      get :release_request_dialog, params: { project: user.home_project }, xhr: true
-    end
-
-    it { expect(response).to have_http_status(:success) }
-  end
-
-  describe 'GET #add_maintained_project_dialog' do
-    let(:maintenance_project) { create(:maintenance_project, name: 'MyProject') }
-
-    before do
-      login user
-      get :add_maintained_project_dialog, params: { project: maintenance_project.name }, xhr: true
-    end
-
-    it { expect(response).to have_http_status(:success) }
-  end
-
-  describe 'GET #unlock_dialog' do
-    before do
-      get :unlock_dialog, params: { project: user.home_project }, xhr: true
-    end
-
-    it { expect(response).to have_http_status(:success) }
-  end
-
-  describe 'GET #edit' do
-    context 'when the user has access to the project' do
-      before do
-        login user
-        get :edit, params: { project: user.home_project }
-      end
-
-      it { expect(response).to have_http_status(:success) }
-    end
-
-    context 'when the user does not have access to the project' do
-      let!(:project_locked_flag) { create(:lock_flag, project: user.home_project) }
-
-      before do
-        login user
-        get :edit, params: { project: user.home_project }
-      end
-
-      it { expect(response).to have_http_status(:found) }
-    end
-  end
-
-  describe 'GET #maintained_projects' do
-    let(:maintenance_project) { create(:maintenance_project, name: 'Project1') }
-    let(:maintained_project) { create(:maintained_project, maintenance_project: maintenance_project) }
-
-    before do
-      login user
-      maintained_project
-      get :maintained_projects, params: { project: maintenance_project }
-    end
-
-    it { expect(response).to have_http_status(:success) }
-    it { expect(assigns[:maintained_projects]).to eq([maintained_project.project.name]) }
-  end
-
   describe '#filter_matches?' do
     let(:input) { 'ThisIsAPackage' }
 
@@ -1287,111 +976,6 @@ RSpec.describe Webui::ProjectController, vcr: true do
       subject { Webui::ProjectController.new.send(:filter_matches?, input, filter_string) }
 
       it { is_expected.to be_falsey }
-    end
-  end
-
-  describe 'GET #status' do
-    let(:params) { { project: project.name } }
-
-    before do
-      get :status, params: params
-    end
-
-    context 'no params set' do
-      # NOTE: These project names need to be different for each context because otherwise the
-      # test backend will fail to cleanup the backend packages which causes failures in this spec
-      let!(:project) do
-        create(:project, name: 'Apache22', title: 'Apache WebServer', description: 'The best webserver ever.')
-      end
-      let!(:package) do
-        create(:package, project: project, name: 'mod_rewrite3', title: 'mod_rewrite', description: 'url rewrite module')
-      end
-
-      it_behaves_like 'a project status controller'
-    end
-
-    context 'param format=json set' do
-      let!(:project) do
-        create(:project, name: 'Apache3', title: 'Apache WebServer', description: 'The best webserver ever.')
-      end
-      let!(:package) do
-        create(:package, project: project, name: 'mod_rewrite3', title: 'mod_rewrite', description: 'url rewrite module')
-      end
-      let(:params) { { project: project.name, format: 'json' } }
-
-      it_behaves_like 'a project status controller'
-    end
-
-    context 'param filter_devel is set' do
-      let!(:project) do
-        create(:project, name: 'Apache4', title: 'Apache WebServer', description: 'The best webserver ever.')
-      end
-      let!(:package) do
-        create(:package, project: project, name: 'mod_rewrite4', title: 'mod_rewrite', description: 'url rewrite module')
-      end
-      let(:params) { { project: project.name, filter_devel: 'No Project' } }
-
-      it { expect(assigns[:filter]).to eq('_none_') }
-    end
-
-    context 'param ignore_pending is set' do
-      let!(:project) do
-        create(:project, name: 'Apache5', title: 'Apache WebServer', description: 'The best webserver ever.')
-      end
-      let!(:package) do
-        create(:package, project: project, name: 'mod_rewrite5', title: 'mod_rewrite', description: 'url rewrite module')
-      end
-      let(:params) { { project: project.name, ignore_pending: true } }
-
-      it { expect(assigns[:ignore_pending]).to be_truthy }
-    end
-
-    context 'param limit_to_fails is set' do
-      let!(:project) do
-        create(:project, name: 'Apache6', title: 'Apache WebServer', description: 'The best webserver ever.')
-      end
-      let!(:package) do
-        create(:package, project: project, name: 'mod_rewrite6', title: 'mod_rewrite', description: 'url rewrite module')
-      end
-      let(:params) { { project: project.name, limit_to_fails: 'false' } }
-
-      it { expect(assigns[:limit_to_fails]).to be_falsey }
-    end
-
-    context 'param limit_to_old is set' do
-      let!(:project) do
-        create(:project, name: 'Apache7', title: 'Apache WebServer', description: 'The best webserver ever.')
-      end
-      let!(:package) do
-        create(:package, project: project, name: 'mod_rewrite7', title: 'mod_rewrite', description: 'url rewrite module')
-      end
-      let(:params) { { project: project.name, limit_to_old: 'true' } }
-
-      it { expect(assigns[:limit_to_old]).to be_truthy }
-    end
-
-    context 'param include_versions is set' do
-      let!(:project) do
-        create(:project, name: 'Apache8', title: 'Apache WebServer', description: 'The best webserver ever.')
-      end
-      let!(:package) do
-        create(:package, project: project, name: 'mod_rewrite8', title: 'mod_rewrite', description: 'url rewrite module')
-      end
-      let(:params) { { project: project.name, include_versions: 'true' } }
-
-      it { expect(assigns[:include_versions]).to be_truthy }
-    end
-
-    context 'param filter_for_user is set' do
-      let!(:project) do
-        create(:project, name: 'Apache9', title: 'Apache WebServer', description: 'The best webserver ever.')
-      end
-      let!(:package) do
-        create(:package, project: project, name: 'mod_rewrite9', title: 'mod_rewrite', description: 'url rewrite module')
-      end
-      let(:params) { { project: project.name, filter_for_user: admin_user.login } }
-
-      it { expect(assigns[:filter_for_user]).to eq(admin_user.login) }
     end
   end
 end

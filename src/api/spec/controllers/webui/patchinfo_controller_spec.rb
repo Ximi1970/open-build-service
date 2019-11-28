@@ -266,7 +266,7 @@ RSpec.describe Webui::PatchinfoController, vcr: true do
       end
 
       it { expect(flash[:notice]).to eq("Patchinfo can't be removed: ") }
-      it { expect(response).to redirect_to(patchinfo_show_path(package: patchinfo_package, project: user.home_project)) }
+      it { expect(response).to redirect_to(show_patchinfo_path(package: patchinfo_package, project: user.home_project)) }
     end
   end
 
@@ -284,6 +284,7 @@ RSpec.describe Webui::PatchinfoController, vcr: true do
           expect(JSON.parse(response.body)).to eq('error' => '',
                                                   'issues' => [['bgo', '132412', 'https://bugzilla.gnome.org/show_bug.cgi?id=132412', '']])
         end
+
         it { expect(response).to have_http_status(:success) }
       end
 
@@ -294,6 +295,7 @@ RSpec.describe Webui::PatchinfoController, vcr: true do
           expect(JSON.parse(response.body)).to eq('error' => '',
                                                   'issues' => [['cve', 'CVE-2010-31337', 'http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2010-31337', '']])
         end
+
         it { expect(response).to have_http_status(:success) }
       end
     end
@@ -314,16 +316,8 @@ RSpec.describe Webui::PatchinfoController, vcr: true do
                                                 error_message,
                                                 'issues' => [])
       }
+
       it { expect(response).to have_http_status(:success) }
     end
-  end
-
-  describe 'GET #delete_dialog' do
-    before do
-      login user
-      get :delete_dialog, xhr: true, params: { project: user.home_project_name, package: patchinfo_package.name }
-    end
-
-    it { expect(response).to have_http_status(:success) }
   end
 end

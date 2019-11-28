@@ -1,14 +1,16 @@
-class Staging::WorkflowsController < ApplicationController
+class Staging::WorkflowsController < Staging::StagingController
   before_action :require_login
   before_action :set_project
+  before_action :check_staging_workflow, only: :create
   before_action :set_staging_workflow, only: [:update, :destroy]
+  before_action :set_xml_hash, only: [:create, :update]
   after_action :verify_authorized
 
   def create
     staging_workflow = @project.build_staging
     authorize staging_workflow
 
-    staging_workflow.managers_group = Group.find_by!(title: xml_hash['managers'])
+    staging_workflow.managers_group = Group.find_by!(title: @parsed_xml[:managers])
 
     if staging_workflow.save
       render_ok
@@ -24,13 +26,18 @@ class Staging::WorkflowsController < ApplicationController
   def destroy
     authorize @staging_workflow
 
+    if params[:with_staging_projects].present?
+      @staging_workflow.staging_projects.destroy_all
+    end
+
     @staging_workflow.destroy!
+    render_ok
   end
 
   def update
     authorize @staging_workflow
 
-    @staging_workflow.managers_group = Group.find_by!(title: xml_hash['managers'])
+    @staging_workflow.managers_group = Group.find_by!(title: @parsed_xml[:managers])
 
     if @staging_workflow.save
       render_ok
@@ -45,22 +52,13 @@ class Staging::WorkflowsController < ApplicationController
 
   private
 
-  def set_project
-    @project = Project.get_by_name(params[:staging_workflow_project])
+  def check_staging_workflow
+    return unless @project.staging
 
-    return if @project
     render_error(
-      status: 404,
-      errorcode: 'not_found',
-      message: "Project '#{params[:staging_workflow_project]}' not found."
+      status: 400,
+      errorcode: 'staging_workflow_exists',
+      message: "Project #{@project} already has an associated Staging Workflow with id: #{@project.staging.id}"
     )
-  end
-
-  def set_staging_workflow
-    @staging_workflow = ::Staging::Workflow.find_by!(project: @project)
-  end
-
-  def xml_hash
-    Xmlhash.parse(request.body.read) || {}
   end
 end

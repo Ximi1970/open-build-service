@@ -4,11 +4,7 @@ RSpec.feature 'Projects', type: :feature, js: true do
   let!(:admin_user) { create(:admin_user, :with_home) }
   let!(:user) { create(:confirmed_user, :with_home, login: 'Jane') }
   let(:project) { user.home_project }
-
-  it_behaves_like 'user tab' do
-    let(:project_path) { project_show_path(user_tab_user.home_project) }
-    let(:project) { user_tab_user.home_project }
-  end
+  let(:broken_package_with_error) { create(:package_with_failed_comment_attribute, project: project, name: 'broken_package') }
 
   scenario 'project show' do
     login user
@@ -19,18 +15,25 @@ RSpec.feature 'Projects', type: :feature, js: true do
     expect(page).to have_css('h3', text: project.title)
   end
 
-  scenario 'changing project title and description' do
-    skip_if_bootstrap
+  scenario 'project status' do
+    login user
+    broken_package_with_error
+    visit project_status_path(project_name: project)
+    uncheck('limit_to_fails', allow_label_click: true)
+    click_button('Filter results')
+    expect(page).to have_text('Status of')
+  end
 
+  scenario 'changing project title and description' do
     login user
     visit project_show_path(project: project)
 
-    click_link('Edit Project')
-    expect(page).to have_text('Edit Project')
+    click_on('Edit Project')
+    expect(page).to have_text("Edit Project #{project}")
 
     fill_in 'project_title', with: 'My Title hopefully got changed'
     fill_in 'project_description', with: 'New description. Not kidding.. Brand new!'
-    click_button('Accept')
+    click_button 'Update'
 
     visit project_show_path(project: project)
     expect(find(:id, 'project-title')).to have_text('My Title hopefully got changed')
@@ -38,7 +41,7 @@ RSpec.feature 'Projects', type: :feature, js: true do
   end
 
   describe 'creating packages in projects owned by user, eg. home projects' do
-    let(:very_long_description) { Faker::Lorem.paragraph(20) }
+    let(:very_long_description) { Faker::Lorem.paragraph(sentence_count: 20) }
 
     before do
       login user
@@ -47,23 +50,9 @@ RSpec.feature 'Projects', type: :feature, js: true do
       expect(page).to have_text("Create Package for #{user.home_project_name}")
     end
 
-    scenario 'with valid data' do
-      skip_if_bootstrap
-
-      fill_in 'name', with: 'coolstuff'
-      fill_in 'title', with: 'cool stuff everyone needs'
-      fill_in 'description', with: very_long_description
-      click_button('Accept')
-
-      expect(page).to have_text("Package 'coolstuff' was created successfully")
-      expect(page.current_path).to eq(package_show_path(project: user.home_project_name, package: 'coolstuff'))
-      expect(find(:css, 'h3#package_title')).to have_text('cool stuff everyone needs')
-      expect(find(:css, 'pre#description-text')).to have_text(very_long_description)
-    end
-
     scenario 'with invalid data (validation fails)' do
       fill_in 'name', with: 'cool stuff'
-      is_bootstrap? ? click_button('Create') : click_button('Accept')
+      click_button('Create')
 
       expect(page).to have_text("Invalid package name: 'cool stuff'")
       expect(page.current_path).to eq("/project/new_package/#{user.home_project_name}")
@@ -73,10 +62,22 @@ RSpec.feature 'Projects', type: :feature, js: true do
       create(:package, name: 'coolstuff', project: user.home_project)
 
       fill_in 'name', with: 'coolstuff'
-      is_bootstrap? ? click_button('Create') : click_button('Accept')
+      click_button('Create')
 
       expect(page).to have_text("Package 'coolstuff' already exists in project '#{user.home_project_name}'")
       expect(page.current_path).to eq("/project/new_package/#{user.home_project_name}")
+    end
+
+    scenario 'with valid data' do
+      fill_in 'name', with: 'coolstuff'
+      fill_in 'title', with: 'cool stuff everyone needs'
+      fill_in 'description', with: very_long_description
+      click_button 'Create'
+
+      expect(page).to have_text("Package 'coolstuff' was created successfully")
+      expect(page).to have_current_path(package_show_path(project: user.home_project_name, package: 'coolstuff'))
+      expect(find(:css, '#package-title')).to have_text('cool stuff everyone needs')
+      expect(find(:css, '#description-text')).to have_text(very_long_description)
     end
   end
 
@@ -102,7 +103,7 @@ RSpec.feature 'Projects', type: :feature, js: true do
       click_link('Create Package')
 
       fill_in 'name', with: 'coolstuff'
-      is_bootstrap? ? click_button('Create') : click_button('Accept')
+      click_button('Create')
 
       expect(page).to have_text("Package 'coolstuff' was created successfully")
       expect(page.current_path).to eq(package_show_path(project: global_project.to_s, package: 'coolstuff'))
@@ -123,24 +124,6 @@ RSpec.feature 'Projects', type: :feature, js: true do
 
       expect(page.current_path).to match(project_show_path(project: "#{user.home_project_name}:coolstuff"))
       expect(find('#project-title').text).to eq("#{user.home_project_name}:coolstuff")
-    end
-
-    scenario "create subproject with checked 'disable publishing' checkbox" do
-      skip_if_bootstrap
-
-      login user
-      visit project_subprojects_path(project: user.home_project)
-
-      click_link('Add New Subproject')
-      fill_in 'project_name', with: 'coolstuff'
-      # Check the checkbox by clicking on its label (side-effect from using custom Bootstrap checkbox)
-      check('disable_publishing', allow_label_click: true)
-      click_button('Accept')
-      click_link('Repositories')
-
-      expect(page).to have_selector('.current_flag_state.icons-publish_disable_blue')
-      subproject = Project.find_by(name: "#{user.home_project_name}:coolstuff")
-      expect(subproject.flags.where(flag: 'publish', status: 'disable')).to exist
     end
   end
 
@@ -176,129 +159,7 @@ RSpec.feature 'Projects', type: :feature, js: true do
     end
   end
 
-  describe 'repositories tab' do
-    before do
-      skip_if_bootstrap
-    end
-
-    include_examples 'tests for sections with flag tables'
-
-    describe 'DoD repositories' do
-      let(:project_with_dod_repo) { create(:project) }
-      let(:repository) { create(:repository, project: project_with_dod_repo) }
-      let!(:download_repository) { create(:download_repository, repository: repository) }
-
-      before do
-        login admin_user
-      end
-
-      scenario 'adding DoD repositories' do
-        visit(project_repositories_path(project: admin_user.home_project_name))
-        click_link('Add DoD repository')
-        fill_in('Repository name', with: 'My DoD repository')
-        select('i586', from: 'Architecture')
-        select('rpmmd', from: 'Type')
-        fill_in('Url', with: 'http://somerandomurl.es')
-        fill_in('Arch. Filter', with: 'i586, noarch')
-        fill_in('Master Url', with: 'http://somerandomurl2.es')
-        fill_in('SSL Fingerprint', with: '293470239742093')
-        fill_in('Public Key', with: 'JLKSDJFSJ83U4902RKLJSDFLJF2J9IJ23OJFKJFSDF')
-        click_button('Save')
-
-        expect(page).to have_css('.repository-container')
-
-        within '.repository-container' do
-          expect(page).to have_text('My DoD repository')
-          expect(page).to have_link('Delete repository')
-          expect(page).to have_text('Download on demand sources')
-          expect(page).to have_link('Add')
-          expect(page).to have_link('Edit')
-          expect(page).to have_link('Delete')
-          expect(page).to have_link('http://somerandomurl.es')
-          expect(page).to have_text('rpmmd')
-        end
-      end
-
-      scenario 'removing DoD repositories' do
-        visit(project_repositories_path(project: project_with_dod_repo))
-        within '.repository-container' do
-          accept_alert do
-            click_link('Delete repository')
-          end
-        end
-        expect(page).to have_text 'Successfully removed repository'
-        expect(project_with_dod_repo.repositories).to be_empty
-      end
-
-      # Note DownloadRepositories belong to Repositories (= DoD repositories)
-      scenario 'editing download repositories' do
-        visit(project_repositories_path(project: project_with_dod_repo))
-        within '.repository-container' do
-          click_link('Edit')
-        end
-        select('i586', from: 'Architecture')
-        select('deb', from: 'Type')
-        fill_in('Url', with: 'http://some_random_url_2.es')
-        fill_in('Arch. Filter', with: 'i586, noarch')
-        fill_in('Master Url', with: 'http://some_other_url.es')
-        fill_in('SSL Fingerprint', with: 'test')
-        fill_in('Public Key', with: 'some_key')
-        click_button('Update Download on Demand')
-
-        download_repository.reload
-        expect(download_repository.arch).to eq('i586')
-        expect(download_repository.repotype).to eq('deb')
-        expect(download_repository.url).to eq('http://some_random_url_2.es')
-        expect(download_repository.archfilter).to eq('i586, noarch')
-        expect(download_repository.masterurl).to eq('http://some_other_url.es')
-        expect(download_repository.mastersslfingerprint).to eq('test')
-        expect(download_repository.pubkey).to eq('some_key')
-      end
-
-      scenario 'removing download repositories' do
-        create(:repository_architecture, repository: repository, architecture: Architecture.find_by_name('i586'))
-        download_repository_2 = create(:download_repository, repository: repository.reload, arch: 'i586')
-
-        visit(project_repositories_path(project: project_with_dod_repo))
-        # Delete link
-        accept_alert do
-          find(:xpath, "//a[@href='/download_repositories/#{download_repository.id}?project=#{project_with_dod_repo}'][text()='Delete']").click
-        end
-        expect(page).to have_text 'Successfully removed Download on Demand'
-        expect(repository.download_repositories.count).to eq(1)
-
-        accept_alert do
-          find(:xpath, "//a[@href='/download_repositories/#{download_repository_2.id}?project=#{project_with_dod_repo}'][text()='Delete']").click
-        end
-        expect(page).to have_text "Download on Demand can't be removed: DoD Repositories must have at least one repository."
-        expect(repository.download_repositories.count).to eq(1)
-      end
-
-      scenario 'adding DoD repositories via meta editor' do
-        fixture_file = File.read(Rails.root + 'test/fixtures/backend/download_on_demand/project_with_dod.xml').
-                       gsub('user5', admin_user.login)
-
-        visit(project_meta_path(project_name: admin_user.home_project_name))
-        page.evaluate_script("editors[0].setValue(\"#{fixture_file.gsub("\n", '\n')}\");")
-        click_button('Save')
-        expect(page).to have_css('#flash-messages', text: 'Config successfully saved!')
-
-        visit(project_repositories_path(project: admin_user.home_project_name))
-        within '.repository-container' do
-          expect(page).to have_link('standard')
-          expect(page).to have_link('Delete repository')
-          expect(page).to have_text('Download on demand sources')
-          expect(page).to have_link('Add')
-          expect(page).to have_link('Edit')
-          expect(page).to have_link('Delete')
-          expect(page).to have_link('http://mola.org2')
-          expect(page).to have_text('rpmmd')
-        end
-      end
-    end
-  end
-
-  describe 'branching' do
+  describe 'branching', vcr: true do
     let(:other_user) { create(:confirmed_user, :with_home, login: 'other_user') }
     let!(:package_of_another_project) { create(:package_with_file, name: 'branch_test_package', project: other_user.home_project) }
 
@@ -311,7 +172,6 @@ RSpec.feature 'Projects', type: :feature, js: true do
     scenario 'an existing package' do
       fill_in('linked_project', with: other_user.home_project_name)
       fill_in('linked_package', with: package_of_another_project.name)
-      expect(page).to(have_text('1 result is available')) unless is_bootstrap?
       # This needs global write through
       click_button('Accept')
 
@@ -330,25 +190,11 @@ RSpec.feature 'Projects', type: :feature, js: true do
       expect(page.current_path).to eq("/package/show/#{user.home_project_name}/some_different_name")
     end
 
-    scenario 'an existing package to an invalid target package or project' do
-      skip_if_bootstrap
-
-      fill_in('linked_project', with: other_user.home_project_name)
-      fill_in('linked_package', with: package_of_another_project.name)
-      fill_in('Branch package name', with: 'something/illegal')
-      # This needs global write through
-      click_button('Accept')
-
-      expect(page).to have_text('Failed to branch: Validation failed: Name is illegal')
-      expect(page.current_path).to eq('/project/new_package_branch/home:Jane')
-    end
-
     scenario 'an existing package were the target package already exists' do
       create(:package_with_file, name: package_of_another_project.name, project: user.home_project)
 
       fill_in('linked_project', with: other_user.home_project_name)
       fill_in('linked_package', with: package_of_another_project.name)
-      expect(page).to(have_text('1 result is available')) unless is_bootstrap?
       # This needs global write through
       click_button('Accept')
 
@@ -357,76 +203,21 @@ RSpec.feature 'Projects', type: :feature, js: true do
     end
 
     scenario 'a non-existing package' do
-      skip_if_bootstrap
-
       fill_in('linked_project', with: 'non-existing_package')
       fill_in('linked_package', with: package_of_another_project.name)
-      # This needs global write through
+
       click_button('Accept')
 
       expect(page).to have_text('Failed to branch: Package does not exist.')
-      expect(page.current_path).to eq('/project/new_package_branch/home:Jane')
-    end
-
-    scenario 'a package with disabled access flag' do
-      skip_if_bootstrap
-
-      create(:access_flag, status: 'disable', project: other_user.home_project)
-
-      fill_in('linked_project', with: other_user.home_project_name)
-      fill_in('linked_package', with: package_of_another_project.name)
-      fill_in('Branch package name', with: 'some_different_name')
-      # This needs global write through
-      click_button('Accept')
-
-      expect(page).to have_text('Failed to branch: Package does not exist.')
-      expect(page.current_path).to eq('/project/new_package_branch/home:Jane')
-    end
-
-    scenario 'a package with disabled sourceaccess flag' do
-      skip_if_bootstrap
-
-      create(:sourceaccess_flag, status: 'disable', project: other_user.home_project)
-
-      fill_in('linked_project', with: other_user.home_project_name)
-      fill_in('linked_package', with: package_of_another_project.name)
-      fill_in('Branch package name', with: 'some_different_name')
-      # This needs global write through
-      click_button('Accept')
-
-      expect(page).to have_text('Sorry, you are not authorized to branch this Package.')
-      expect(page.current_path).to eq('/project/new_package_branch/home:Jane')
-    end
-
-    scenario 'a package and select current revision' do
-      skip_if_bootstrap
-
-      fill_in('linked_project', with: other_user.home_project_name)
-      fill_in('linked_package', with: package_of_another_project.name)
-
-      find("input[id='current_revision']").set(true)
-
-      # This needs global write through
-      click_button('Accept')
-
-      expect(page).to have_text('Successfully branched package')
-      expect(page.current_path).to eq('/package/show/home:Jane/branch_test_package')
-
-      visit package_show_path('home:Jane', 'branch_test_package', expand: 0)
-      click_link('_link')
-
-      expect(page).to have_xpath(".//span[@class='cm-attribute' and text()='rev']")
+      expect(page).to have_current_path(project_show_path('home:Jane'))
     end
   end
 
   describe 'maintenance projects' do
     scenario 'creating a maintenance project' do
-      skip_if_bootstrap
-
       login(admin_user)
       visit project_show_path(project)
 
-      click_link('Advanced') unless is_bootstrap?
       click_link('Attributes')
       click_link('Add a new attribute')
       select('OBS:MaintenanceProject')
@@ -437,143 +228,30 @@ RSpec.feature 'Projects', type: :feature, js: true do
     end
   end
 
-  describe 'maintained projects' do
-    let(:maintenance_project) { create(:maintenance_project, name: 'maintenance_project') }
+  describe 'maintenance incidents', vcr: true do
+    let(:maintenance_project) { create(:maintenance_project, name: "#{project.name}:maintenance_project") }
+    let(:target_repository) { create(:repository, name: 'theone') }
 
-    scenario 'creating a maintened project' do
-      skip_if_bootstrap
+    scenario 'visiting the maintenance overview' do
+      login user
 
-      login(admin_user)
       visit project_show_path(maintenance_project)
+      click_link('Incidents')
+      click_link('Create Maintenance Incident')
+      expect(page).to have_css('#flash', text: "Created maintenance incident project #{project.name}:maintenance_project:0")
 
-      click_link('Maintained Projects')
-      click_link('Add project to maintenance')
-      fill_in('Project to maintain:', with: project.name)
-      expect(page).to have_text('1 result is available')
-      click_button('Accept')
+      # We can not create this via the Bootstrap UI, except by adding plain XML to the meta editor
+      repository = create(:repository, project: Project.find_by(name: "#{project.name}:maintenance_project:0"), name: 'target')
+      create(:release_target, repository: repository, target_repository: target_repository, trigger: 'maintenance')
 
-      expect(page).to have_text("Added #{project.name} to maintenance")
-      expect(find('table#maintained_projects_table td:first-child')).to have_text(project.name)
-    end
-  end
+      visit project_show_path(maintenance_project)
+      click_link('Incidents')
 
-  describe 'monitor' do
-    let!(:project) { create(:project, name: 'TestProject') }
-    let!(:package1) { create(:package, project: project, name: 'TestPackage') }
-    let!(:package2) { create(:package, project: project, name: 'SecondPackage') }
-    let!(:repository1) { create(:repository, project: project, name: 'openSUSE_Tumbleweed', architectures: ['x86_64', 'i586']) }
-    let!(:repository2) { create(:repository, project: project, name: 'openSUSE_Leap_42.3', architectures: ['x86_64', 'i586']) }
-    let!(:repository3) { create(:repository, project: project, name: 'openSUSE_Leap_42.2', architectures: ['x86_64', 'i586']) }
-
-    let(:build_results_xml) do
-      <<-XML
-      <resultlist state="dc66a487ea4d97b4f157d075a0e747b9">
-        <result project="TestProject" repository="openSUSE_Tumbleweed" arch="x86_64" code="published" state="published">
-          <status package="SecondPackage" code="broken">
-            <details>no source uploaded</details>
-          </status>
-          <status package="TestPackage" code="broken">
-            <details>no source uploaded</details>
-          </status>
-        </result>
-        <result project="TestProject" repository="openSUSE_Leap_42.3" arch="x86_64" code="published" state="published">
-          <status package="SecondPackage" code="broken">
-            <details>no source uploaded</details>
-          </status>
-          <status package="TestPackage" code="broken">
-            <details>no source uploaded</details>
-          </status>
-        </result>
-        <result project="TestProject" repository="openSUSE_Leap_42.2" arch="x86_64" code="published" state="published">
-          <status package="SecondPackage" code="broken">
-            <details>no source uploaded</details>
-          </status>
-          <status package="TestPackage" code="broken">
-            <details>no source uploaded</details>
-          </status>
-        </result>
-        <result project="TestProject" repository="openSUSE_Tumbleweed" arch="i586" code="published" state="published">
-          <status package="SecondPackage" code="broken">
-            <details>no source uploaded</details>
-          </status>
-          <status package="TestPackage" code="broken">
-            <details>no source uploaded</details>
-          </status>
-        </result>
-        <result project="TestProject" repository="openSUSE_Leap_42.3" arch="i586" code="published" state="published">
-          <status package="SecondPackage" code="broken">
-            <details>no source uploaded</details>
-          </status>
-          <status package="TestPackage" code="broken">
-            <details>no source uploaded</details>
-          </status>
-        </result>
-        <result project="TestProject" repository="openSUSE_Leap_42.2" arch="i586" code="published" state="published">
-          <status package="SecondPackage" code="broken">
-            <details>no source uploaded</details>
-          </status>
-          <status package="TestPackage" code="broken">
-            <details>no source uploaded</details>
-          </status>
-        </result>
-      </resultlist>
-      XML
-    end
-
-    before do
-      login admin_user
-      allow(Backend::Api::BuildResults::Status).to receive(:result_swiss_knife).and_return(build_results_xml)
-      visit project_monitor_path(project.name)
-      expect(page).to have_text('Monitor')
-    end
-
-    scenario 'filtering build results by package name' do
-      skip_if_bootstrap # this is now handled by datatables, we don't need to test it
-      fill_in 'pkgname', with: package1.name
-      click_button 'Filter:'
-
-      build_status_table = find('table.buildstatus')
-      expect(build_status_table).to have_text(package1.name)
-      expect(build_status_table).not_to have_text(package2.name)
-    end
-
-    scenario 'filtering build results by architecture' do
-      skip_if_bootstrap
-      find('#archlink').click
-      uncheck 'arch_x86_64'
-      click_button 'Filter:'
-
-      build_status_table = find('table.buildstatus')
-      expect(build_status_table).to have_text('i586')
-      expect(build_status_table).not_to have_text('x86_64')
-    end
-
-    scenario 'filtering build results by repository' do
-      skip_if_bootstrap
-      find('#repolink').click
-      uncheck 'repo_openSUSE_Leap_42_2'
-      uncheck 'repo_openSUSE_Leap_42_3'
-      click_button 'Filter:'
-
-      build_status_table = find('table.buildstatus')
-      expect(build_status_table).not_to have_text('openSUSE_Leap_42.2')
-      expect(build_status_table).not_to have_text('openSUSE_Leap_42.3')
-      expect(build_status_table).to have_text('openSUSE_Tumbleweed')
-    end
-
-    scenario 'filtering build results by last build' do
-      skip_if_bootstrap # we don't support this anymore
-      check 'lastbuild'
-      click_button 'Filter:'
-
-      build_status_table = find('table.buildstatus')
-      expect(build_status_table).to have_text('openSUSE_Leap_42.2')
-      expect(build_status_table).to have_text('openSUSE_Leap_42.3')
-      expect(build_status_table).to have_text('openSUSE_Tumbleweed')
-      expect(build_status_table).to have_text('i586')
-      expect(build_status_table).to have_text('x86_64')
-      expect(build_status_table).to have_text(package1.name)
-      expect(build_status_table).to have_text(package2.name)
+      within('#incident-table') do
+        maintenance_project.maintenance_incidents.each do |incident|
+          expect(page).to have_link("0: #{incident.name}", href: project_show_path(incident.name))
+        end
+      end
     end
   end
 end

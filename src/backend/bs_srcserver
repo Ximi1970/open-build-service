@@ -4065,7 +4065,7 @@ sub getbinarylist {
   my $view = $cgi->{'view'};
   my $nosource = $cgi->{'nosource'};
   my $reposerver = $BSConfig::partitioning ? BSSrcServer::Partition::projid2reposerver($projid) : $BSConfig::reposerver;
-  my @args = BSRPC::args($cgi, 'view', 'nosource', 'withmd5', 'binary');
+  my @args = BSRPC::args($cgi, 'view', 'nosource', 'withmd5', 'binary', 'module');
   if ($view && ($view eq 'cache' || $view eq 'cpio' || $view eq 'solv' || $view eq 'solvstate')) {
     # do not check arch in interconnect mode
     my $proj = checkprojrepoarch($projid, $repoid, undef, 1);
@@ -4084,6 +4084,7 @@ sub getbinarylist {
 	push @args, "repository=$repoid";
 	push @args, "arch=$arch";
 	push @args, "binaries=".join(',', @{$cgi->{'binary'} || []});
+	push @args, map {"module=$_"} @{$cgi->{'module'} || []};
 	BSHandoff::handoff('/getbinaries', undef, @args);
       }
       BSHandoff::handoff("/build/$projid/$repoid/$arch/$packid", undef, @args);
@@ -4118,6 +4119,7 @@ sub getbinarylist {
       push @args, "arch=$arch";
       push @args, 'nometa=1' if $cgi->{'nometa'};
       push @args, "binaries=".join(',', @{$cgi->{'binary'} || []});
+      push @args, map {"module=$_"} @{$cgi->{'module'} || []};
       BSHandoff::handoff('/getbinaryversions', undef, @args);
     }
     if (!$BSStdServer::isajax && $packid eq '_repository') {
@@ -4167,6 +4169,7 @@ sub getbinary {
     push @args, "arch=$arch";
     push @args, "binaries=$filename";
     push @args, "raw=1";
+    push @args, map {"module=$_"} @{$cgi->{'module'} || []};
     BSHandoff::handoff('/getbinaries', undef, @args);
   }
   if ($view eq 'publishedpath') {
@@ -4174,8 +4177,7 @@ sub getbinary {
     return published_path($cgi, $projid, $repoid);
   }
   my $reposerver = $BSConfig::partitioning ? BSSrcServer::Partition::projid2reposerver($projid) : $BSConfig::reposerver;
-  my @args;
-  push @args, "view=$view" if $view;
+  my @args = BSRPC::args($cgi, 'view', 'module');
   my $param = {
     'uri' => "$reposerver/build/$projid/$repoid/$arch/$packid/$filename",
     'ignorestatus' => 1,
@@ -4332,7 +4334,7 @@ sub getlogfile {
     }
   }
 
-  my @args = BSRPC::args($cgi, 'last', 'nostream', 'start', 'end', 'view');
+  my @args = BSRPC::args($cgi, 'last', 'lastsucceeded', 'nostream', 'start', 'end', 'view');
   if (!$BSStdServer::isajax && !$cgi->{'view'}) {
     BSHandoff::handoff("/build/$projid/$repoid/$arch/$packid/_log", undef, @args);
   }
@@ -5046,7 +5048,7 @@ sub published {
   if (defined($projid) && defined($repoid) && $cgi->{'view'} && $cgi->{'view'} eq 'ymp') {
     # attach projpack data so that the repo server does not need to
     # reconnect us
-    $projpack = (getprojpack({'nopackages' => 1, 'withrepos' => 1, 'expandedrepos' => 1}, [ $projid ], [ $repoid ], undef, 'noarch'))[0];
+    $projpack = (getprojpack({'nopackages' => 1, 'withrepos' => 1, 'expandedrepos' => 1, 'withconfig' => 1}, [ $projid ], [ $repoid ], undef, 'noarch'))[0];
     my $proj = $projpack->{'project'}->[0];
     die("no such project\n") unless $proj && $proj->{'name'} eq $projid;
     my $repo = $proj->{'repository'}->[0];
@@ -5055,11 +5057,12 @@ sub published {
     my @nprojids = grep {$_ ne $projid} map {$_->{'project'}} @{$repo->{'path'} || []};
     @nprojids = BSUtil::unify(@nprojids);
     for my $nprojid (@nprojids) {
-      my $nproj = (getproject({}, $nprojid))[0];
+      my $nproj = (getproject({'withconfig' => 1}, $nprojid))[0];
       push @{$projpack->{'project'}}, {
 	'name' => $nprojid,
 	'title' => $nproj->{'title'} || '',
 	'description' => $nproj->{'description'} || '',
+	'config' => $nproj->{'config'} || '',
       };
     }
   }
@@ -5238,14 +5241,14 @@ sub getsignkey {
 }
 
 sub projid2sslcert {
-  my ($skprojid, $sk, $projid, $nocreate) = @_;
+  my ($skprojid, $sk, $projid, $nocreate, $signtype) = @_;
   my $rev = BSRevision::getrev_meta($skprojid, undef);
   my $files = BSRevision::lsrev($rev);
   if (!$files->{'_sslcert'}) {
     return undef if $nocreate;
     if (!$sk || length($sk) <= 2) {
       # length(signkey) <= 2 means special handling: do not commit it
-      return BSSrcServer::Signkey::pubkey2sslcert($projid || $skprojid, "$projectsdir/$skprojid.pkg/_pubkey", "$projectsdir/$skprojid.pkg/_signkey");
+      return BSSrcServer::Signkey::pubkey2sslcert($projid || $skprojid, "$projectsdir/$skprojid.pkg/_pubkey", "$projectsdir/$skprojid.pkg/_signkey", $signtype);
     }
     my $cert = BSSrcServer::Signkey::pubkey2sslcert($skprojid, "$projectsdir/$skprojid.pkg/_pubkey", "$projectsdir/$skprojid.pkg/_signkey");
     mkdir_p($uploaddir);
@@ -5259,14 +5262,15 @@ sub projid2sslcert {
 sub getsslcert {
   my ($cgi, $projid) = @_;
   my ($skprojid, $sk) = findsignkey($projid);
+  my $signtype = $cgi->{'signtype'};
   if ($sk) {
     my $pk = readstr("$projectsdir/$skprojid.pkg/_pubkey", 1);
     $pk = autoextend_check($skprojid, $pk) if $cgi->{'autoextend'};
-    my $cert = projid2sslcert($skprojid, $sk, $projid);
+    my $cert = projid2sslcert($skprojid, $sk, $projid, 0, $signtype);
     return ($cert, 'Content-Type: text/plain');
   }
   if ($BSConfig::sign_project && $BSConfig::sign) {
-    my $cert = BSSrcServer::Signkey::getdefaultcert($projid);
+    my $cert = BSSrcServer::Signkey::getdefaultcert($projid, $signtype);
     return ($cert, 'Content-Type: text/plain') if $cert;
   }
   return ('', 'Content-Type: text/plain');
@@ -5276,6 +5280,7 @@ sub getkeyinfo {
   my ($cgi, $projid) = @_;
 
   my ($skprojid, $sk) = findsignkey($projid);
+  my $signtype = $cgi->{'signtype'};
   my ($pk, $cert);
   if ($sk) {
     $pk = readstr("$projectsdir/$skprojid.pkg/_pubkey", 1);
@@ -5283,13 +5288,13 @@ sub getkeyinfo {
     $pk = autoextend_check($skprojid, $pk) if $cgi->{'autoextend'};
   }
   if ($cgi->{'withsslcert'} && $skprojid && $pk) {
-    $cert = projid2sslcert($skprojid, $sk, $projid, $cgi->{'donotcreatecert'});
+    $cert = projid2sslcert($skprojid, $sk, $projid, $cgi->{'donotcreatecert'}, $signtype);
   }
   if ($cgi->{'withsslcert'} && !$skprojid && $BSConfig::sign_project && $BSConfig::sign) {
     if ($cgi->{'donotcreatecert'}) {
-      eval { $cert = BSSrcServer::Signkey::getdefaultcert($projid) };
+      eval { $cert = BSSrcServer::Signkey::getdefaultcert($projid, $signtype) };
     } else {
-      $cert = BSSrcServer::Signkey::getdefaultcert($projid);
+      $cert = BSSrcServer::Signkey::getdefaultcert($projid, $signtype);
     }
   }
   if (!$pk && $BSConfig::sign_project && $BSConfig::sign) {
@@ -5355,13 +5360,14 @@ sub worker_getbinaries {
     push @args, "repository=$repoid";
     push @args, "arch=$arch";
     push @args, "binaries=$cgi->{'binaries'}";
+    push @args, map {"module=$_"} @{$cgi->{'module'} || []};
     BSHandoff::handoff('/getbinaries', undef, @args);
   }
   my @binaries = split(',', $cgi->{'binaries'});
   my $proj = findremote($projid);
-  my $binarylist = BSSrcServer::Remote::getremotebinarylist($proj, $projid, $repoid, $arch, \@binaries);
+  my $binarylist = BSSrcServer::Remote::getremotebinarylist($proj, $projid, $repoid, $arch, \@binaries, $cgi->{'module'});
   return undef unless $binarylist;
-  my $reply = BSSrcServer::Remote::getremotebinaries($proj, $projid, $repoid, $arch, \@binaries, $binarylist);
+  my $reply = BSSrcServer::Remote::getremotebinaries($proj, $projid, $repoid, $arch, \@binaries, $binarylist, $cgi->{'module'});
   return undef unless $reply;
   if ($cgi->{'raw'}) {
     die("can only transport one binary in raw mode\n") unless @$reply == 1;
@@ -5385,11 +5391,12 @@ sub worker_getbinaryversions {
     push @args, "arch=$arch";
     push @args, "binaries=$cgi->{'binaries'}";
     push @args, "nometa=1" if $cgi->{'nometa'};
+    push @args, map {"module=$_"} @{$cgi->{'module'} || []};
     BSHandoff::handoff('/getbinaryversions', undef, @args);
   }
   my @binaries = split(',', $cgi->{'binaries'});
   my $proj = findremote($projid);
-  my $binaryversions = BSSrcServer::Remote::getremotebinaryversions($proj, $projid, $repoid, $arch, \@binaries);
+  my $binaryversions = BSSrcServer::Remote::getremotebinaryversions($proj, $projid, $repoid, $arch, \@binaries, $cgi->{'module'});
   return undef unless $binaryversions;
   my $bvl = {};
   $bvl->{'binary'} = [ map {$binaryversions->{$_}} @binaries];
@@ -6582,7 +6589,7 @@ my $dispatches = [
   'DELETE:/source/$project/_config user:? comment:?' => \&delprojectconfig,
 
   '/source/$project/_history rev? meta:bool? deleted:bool? limit:num?' => \&getpackagehistory,
-  '/source/$project/_keyinfo withsslcert:bool? autoextend:bool? donotcreatecert:bool?' => \&getkeyinfo,
+  '/source/$project/_keyinfo withsslcert:bool? autoextend:bool? donotcreatecert:bool? signtype:?' => \&getkeyinfo,
 
   'POST:/source/$project/$package cmd=diff rev? orev:rev? oproject:project? opackage:package? expand:bool? linkrev? olinkrev:? unified:bool? missingok:bool? meta:bool? file:filename* filelimit:num? tarlimit:num? view:? withissues:bool? onlyissues:bool? nocache:bool? nodiff:bool?' => \&sourcediff,
   'POST:/source/$project/$package cmd=linkdiff rev? linkrev? unified:bool? file:filename* filelimit:num? tarlimit:num? view:? withissues:bool? onlyissues:bool?' => \&linkdiff,
@@ -6637,7 +6644,7 @@ my $dispatches = [
   # worker calls
   '/getsources $project $package $srcmd5:md5 workerid?' => \&getsources,
   '/getconfig $project $repository path:prp* workerid?' => \&getbuildconfig,
-  '/getsslcert $project autoextend:bool? workerid?' => \&getsslcert,
+  '/getsslcert $project autoextend:bool? workerid? signtype:?' => \&getsslcert,
   '/getbinaries $project $repository $arch binaries: nometa:bool? workerid?' => \&worker_getbinaries,
   '/getbinaryversions $project $repository $arch binaries: nometa:bool? workerid?' => \&worker_getbinaryversions,
 
@@ -6695,15 +6702,15 @@ my $dispatches = [
   'POST:/build/$project/$repository/$arch/_repository match:' =>  \&postrepo,
   'POST:/build/$project/$repository/$arch/$package cmd=copy oproject:project? opackage:package? orepository:repository? setupdateinfoid:? resign:bool? setrelease:? multibuild:bool?' => \&copybuild,
   'POST:/build/$project/$repository/$arch/$package' => \&uploadbuild,
-  '/build/$project/$repository/$arch/$package_repository view:? binary:filename* nometa:bool? nosource:bool? withmd5:bool?' => \&getbinarylist,
-  'POST:/build/$project/$repository/$arch/$package_repository/_buildinfo add:* debug:bool?' => \&getbuildinfo_post,
+  '/build/$project/$repository/$arch/$package_repository view:? binary:filename* nometa:bool? nosource:bool? withmd5:bool? module*' => \&getbinarylist,
+  'POST:/build/$project/$repository/$arch/$package_repositorybuild/_buildinfo add:* debug:bool?' => \&getbuildinfo_post,
   '/build/$project/$repository/$arch/$package/_buildinfo add:* internal:bool? debug:bool?' => \&getbuildinfo,
   '/build/$project/$repository/$arch/$package/_jobstatus' => \&getjobstatus,
-  '/build/$project/$repository/$arch/$package/_log nostream:bool? last:bool? start:intnum? end:num? view:?' => \&getlogfile,
+  '/build/$project/$repository/$arch/$package/_log nostream:bool? last:bool? lastsucceeded:bool? start:intnum? end:num? view:?' => \&getlogfile,
   '/build/$project/$repository/$arch/$package/_reason' => \&getbuildreason,
   '/build/$project/$repository/$arch/$package/_status' => \&getbuildstatus,
   '/build/$project/$repository/$arch/$package/_history limit:num?' => \&getbuildhistory,
-  '/build/$project/$repository/$arch/$package_repository/$filename view:?' => \&getbinary,
+  '/build/$project/$repository/$arch/$package_repository/$filename view:? module*' => \&getbinary,
   'PUT:/build/$project/$repository/$arch/_repository/$filename ignoreolder:bool? wipe:bool?' => \&putbinary,
   'DELETE:/build/$project/$repository/$arch/_repository/$filename' => \&delbinary,
 
@@ -6750,10 +6757,10 @@ my $dispatches_ajax = [
   '/ajaxstatus' => \&getajaxstatus,
   '/build/$project/_result oldstate:md5? view:resultview* repository* arch* package* code:*' => \&getresult,
   '/build/$project/$repository/$arch package* view:?' => \&getpackagelist_build,
-  '/build/$project/$repository/$arch/$package/_log nostream:bool? last:bool? start:intnum? end:num?' => \&getlogfile,
-  '/build/$project/$repository/$arch/$package_repository view:? binary:filename* nometa:bool? nosource:bool? withmd5:bool?' => \&getbinarylist,
-  '/getbinaries $project $repository $arch binaries: nometa:bool? raw:bool?' => \&worker_getbinaries,
-  '/getbinaryversions $project $repository $arch binaries: nometa:bool?' => \&worker_getbinaryversions,
+  '/build/$project/$repository/$arch/$package/_log nostream:bool? last:bool? lastsucceeded:bool? start:intnum? end:num?' => \&getlogfile,
+  '/build/$project/$repository/$arch/$package_repository view:? binary:filename* nometa:bool? nosource:bool? withmd5:bool? module*' => \&getbinarylist,
+  '/getbinaries $project $repository $arch binaries: nometa:bool? raw:bool? module*' => \&worker_getbinaries,
+  '/getbinaryversions $project $repository $arch binaries: nometa:bool? module*' => \&worker_getbinaryversions,
   '/lastevents $filter:* start:num? obsname:?' => \&lastevents,
   '/lasteventsproxy $filter:* start:num? remoteurl: client:?' => \&lasteventsproxy,
   '/lastnotifications start:num? view:? block:bool?' => \&lastnotifications,

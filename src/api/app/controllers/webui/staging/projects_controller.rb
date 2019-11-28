@@ -1,12 +1,9 @@
 module Webui
   module Staging
     class ProjectsController < WebuiController
-      layout 'webui2/webui'
-
-      before_action :require_login
+      before_action :require_login, except: :show
       before_action :set_staging_workflow
       after_action :verify_authorized, except: :show
-      before_action :set_webui2_views
 
       def create
         authorize @staging_workflow
@@ -26,8 +23,7 @@ module Webui
 
         if staging_project.valid? && staging_project.store
           flash[:success] = "Staging project with name = \"#{staging_project}\" was successfully created"
-          staging_project.create_project_log_entry(User.session!)
-
+          CreateProjectLogEntryJob.perform_later(project_log_entry_payload(staging_project), staging_project.created_at.to_s, staging_project.class.name)
           return
         end
 
@@ -36,6 +32,13 @@ module Webui
 
       def show
         @staging_project = @staging_workflow.staging_projects.find_by(name: params[:project_name])
+
+        unless @staging_project
+          redirect_back(fallback_location: staging_workflow_path(@staging_workflow))
+          flash[:error] = "Staging Project \"#{params[:project_name]}\" doesn't exist for this Staging."
+          return
+        end
+
         @staging_project_log_entries = @staging_project.project_log_entries
                                                        .where(event_type: [:staging_project_created, :staged_request, :unstaged_request])
                                                        .includes(:bs_request)
@@ -53,7 +56,13 @@ module Webui
 
         unless staging_project
           redirect_back(fallback_location: edit_staging_workflow_path(@staging_workflow))
-          flash[:error] = "Staging Project with name = \"#{params[:project_name]}\" doesn't exist for this StagingWorkflow"
+          flash[:error] = "Staging Project \"#{params[:project_name]}\" doesn't exist for this Staging"
+          return
+        end
+
+        if staging_project.staged_requests.present?
+          redirect_back(fallback_location: edit_staging_workflow_path(@staging_workflow))
+          flash[:error] = "Staging Project \"#{params[:project_name]}\" could not be deleted because it has staged requests."
           return
         end
 
@@ -84,6 +93,11 @@ module Webui
       end
 
       private
+
+      def project_log_entry_payload(staging_project)
+        # TODO: model ProjectLogEntry should be able to work with symbols
+        { 'project' => staging_project, 'user_name' => User.session!, 'event_type' => 'staging_project_created' }
+      end
 
       def set_staging_workflow
         @staging_workflow = ::Staging::Workflow.find(params[:staging_workflow_id])

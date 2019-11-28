@@ -34,6 +34,7 @@ BuildRequires:  gcc
 BuildRequires:  gcc-c++
 BuildRequires:  glibc-devel
 BuildRequires:  libtool
+BuildRequires:  libffi-devel
 BuildRequires:  libxml2-devel
 BuildRequires:  libxslt-devel
 BuildRequires:  make
@@ -43,6 +44,7 @@ BuildRequires:  openldap2-devel
 BuildRequires:  python-devel
 BuildRequires:  %{rb_default_ruby_suffix}-devel
 BuildRequires:  %{rubygem bundler}
+BuildRequires:  chrpath
 
 BuildRoot:      %{_tmppath}/%{name}-%{version}-build
 
@@ -50,7 +52,7 @@ BuildRoot:      %{_tmppath}/%{name}-%{version}-build
 This package bundles all the gems required by the Open Build Service
 to make it easier to deploy the obs-server package.
 
-%define rake_version 12.3.3
+%define rake_version 13.0.1
 %define rack_version 2.0.7
 
 %package -n obs-api-deps
@@ -99,7 +101,10 @@ cp %{S:0} %{S:1} .
 mkdir -p vendor/cache
 cp %{_sourcedir}/vendor/cache/*.gem vendor/cache
 export GEM_HOME=~/.gems
+bundle config build.ffi --enable-system-libffi
+bundle config build.mysql2 --with-cflags='%{optflags} -Wno-return-type'
 bundle config build.nokogiri --use-system-libraries
+bundle config build.sassc --disable-march-tune-native
 
 %install
 bundle --local --path %{buildroot}%_libdir/obs-api/
@@ -112,11 +117,6 @@ test -f %{buildroot}%_libdir/obs-api/%{rb_default_path}/gems/rack-%{rack_version
 
 # run gem clean up script
 /usr/lib/rpm/gem_build_cleanup.sh %{buildroot}%_libdir/obs-api/ruby/*/
-
-# work around sassc bug - and install libsass
-sassc_dir=$(ls -1d %{buildroot}%_libdir/obs-api/%{rb_default_path}/gems/sassc-2*)
-install -D -m 755 $sassc_dir/ext/libsass/lib/libsass.so $sassc_dir/lib
-sed -i -e 's,/ext/libsass,,' $sassc_dir/lib/sassc/native.rb
 
 # Remove sources of extensions, we don't need them
 rm -rf %{buildroot}%_libdir/obs-api/ruby/*/gems/*/ext/

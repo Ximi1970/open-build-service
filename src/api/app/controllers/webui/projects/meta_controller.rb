@@ -7,7 +7,6 @@ module Webui
 
       def show
         @meta = @project.render_xml
-        switch_to_webui2
       end
 
       def update
@@ -21,8 +20,7 @@ module Webui
                    flash.now[:error] = updater.errors
                    400
                  end
-        switch_to_webui2
-        render layout: false, status: status, partial: "layouts/#{ui_namespace}/flash", object: flash
+        render layout: false, status: status, partial: 'layouts/webui/flash', object: flash
       end
 
       private
@@ -32,7 +30,7 @@ module Webui
         meta_validator.call
         if meta_validator.errors?
           flash.now[:error] = meta_validator.errors
-          render layout: false, status: 400, partial: "layouts/#{ui_namespace}/flash", object: flash
+          render layout: false, status: 400, partial: 'layouts/webui/flash', object: flash
         else
           @request_data = meta_validator.request_data
         end

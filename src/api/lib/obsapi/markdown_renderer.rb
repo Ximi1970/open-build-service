@@ -1,4 +1,5 @@
 require 'uri'
+require 'cgi'
 
 module OBSApi
   class MarkdownRenderer < Redcarpet::Render::HTML
@@ -12,16 +13,20 @@ module OBSApi
       # request#12345 links
       fulldoc.gsub!(/(sr|req|request)#(\d+)/i) { |s| "[#{s}](#{request_show_url(number: Regexp.last_match(2))})" }
       # @user links
-      fulldoc.gsub!(/([^\w]|^)?@([-\w]+)([^\w]|$)/) \
-                   { "#{Regexp.last_match(1)}[@#{Regexp.last_match(2)}](#{user_show_url(Regexp.last_match(2))})#{Regexp.last_match(3)}" }
+      fulldoc.gsub!(/([^\w]|^)@(\b[-\w]+\b)(?:\b|$)/) \
+                   { "#{Regexp.last_match(1)}[@#{Regexp.last_match(2)}](#{user_url(Regexp.last_match(2))})" }
       # bnc#12345 links
       IssueTracker.all.each do |t|
         fulldoc = t.get_markdown(fulldoc)
       end
+      fulldoc
+    end
+
+    def block_html(raw_html)
       # sanitize the HTML we get
-      Sanitize.fragment(fulldoc, Sanitize::Config.merge(Sanitize::Config::RESTRICTED,
-                                                        elements: Sanitize::Config::RESTRICTED[:elements] + ['pre'],
-                                                        remove_contents: true))
+      Sanitize.fragment(raw_html, Sanitize::Config.merge(Sanitize::Config::RESTRICTED,
+                                                         elements: Sanitize::Config::RESTRICTED[:elements] + ['pre'],
+                                                         remove_contents: true))
     end
 
     # unfortunately we can't call super (into C) - see vmg/redcarpet#51
@@ -31,7 +36,12 @@ module OBSApi
         link = URI.join(::Configuration.obs_url, link)
       rescue URI::InvalidURIError
       end
-      "<a href='#{link}'#{title}>#{content}</a>"
+      "<a href='#{link}'#{title}>#{CGI.escape_html(content)}</a>"
+    end
+
+    def block_code(code, language)
+      language ||= :plaintext
+      CodeRay.scan(code, language).div(css: :class)
     end
   end
 end

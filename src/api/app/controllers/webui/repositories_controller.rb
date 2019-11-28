@@ -2,7 +2,7 @@ class Webui::RepositoriesController < Webui::WebuiController
   before_action :set_project
   before_action :set_repository, only: [:state]
   before_action :set_architectures, only: [:index, :change_flag]
-  before_action :find_repository_parent, only: [:index, :create_flag, :remove_flag, :toggle_flag, :change_flag]
+  before_action :find_repository_parent, only: [:index, :change_flag]
   before_action :check_ajax, only: :change_flag
   after_action :verify_authorized, except: [:index, :distributions, :state]
 
@@ -14,18 +14,11 @@ class Webui::RepositoriesController < Webui::WebuiController
     @available_architectures = Architecture.available
     @repositories = @project.repositories.preload({ path_elements: { link: :project } }, :architectures)
     @repositories = @repositories.includes(:download_repositories)
-    @user_can_modify = policy(@project).update?
-    if switch_to_webui2
-      @flags = {}
-      [:build, :debuginfo, :publish, :useforbuild].each do |flag_type|
-        @flags[flag_type] = Flag::SpecifiedFlags.new(@main_object, flag_type)
-      end
-    else
-      repository_names = @repositories.pluck(:name)
-      @build = @main_object.get_flags('build', repository_names, @architectures)
-      @debuginfo = @main_object.get_flags('debuginfo', repository_names, @architectures)
-      @publish = @main_object.get_flags('publish', repository_names, @architectures)
-      @useforbuild = @main_object.get_flags('useforbuild', repository_names, @architectures)
+    @user_can_modify = @package.present? ? policy(@package).update? : policy(@project).update?
+
+    @flags = {}
+    [:build, :debuginfo, :publish, :useforbuild].each do |flag_type|
+      @flags[flag_type] = Flag::SpecifiedFlags.new(@main_object, flag_type)
     end
   end
 
@@ -41,8 +34,6 @@ class Webui::RepositoriesController < Webui::WebuiController
       @distributions[dis['vendor']] ||= []
       @distributions[dis['vendor']] << dis
     end
-
-    switch_to_webui2
 
     return unless @distributions.empty?
     redirect_to(action: 'new', project: @project) && return unless User.admin_session?
@@ -78,8 +69,6 @@ class Webui::RepositoriesController < Webui::WebuiController
         format.js
       end
     end
-
-    switch_to_webui2
   end
 
   # POST project/update_target/:project
@@ -121,14 +110,10 @@ class Webui::RepositoriesController < Webui::WebuiController
         format.js
       end
     end
-
-    switch_to_webui2
   end
 
   # GET project/repository_state/:project/:repository
-  def state
-    switch_to_webui2
-  end
+  def state; end
 
   # POST /project/create_dod_repository
   def create_dod_repository
@@ -150,8 +135,6 @@ class Webui::RepositoriesController < Webui::WebuiController
     rescue ::Timeout::Error, ActiveRecord::RecordInvalid => e
       @error = "Couldn't add repository: #{e.message}"
     end
-
-    return unless switch_to_webui2?
 
     if @error
       flash[:error] = @error
@@ -188,77 +171,9 @@ class Webui::RepositoriesController < Webui::WebuiController
     end
   end
 
-  # TODO: bento_only
   # POST flag/:project(/:package)
-  def create_flag
-    authorize @main_object, :update?
-    @flag = @main_object.flags.new(status: params[:status], flag: params[:flag])
-    authorize @flag, :create?
-    @flag.architecture = Architecture.find_by_name(params[:architecture])
-    @flag.repo = params[:repository] if params[:repository].present?
-
-    respond_to do |format|
-      if @flag.save
-        # FIXME: This should happen in Flag or even better in Project
-        @main_object.store
-        format.html { redirect_to(action: :index, controller: :repositories, project: params[:project], package: params[:package]) }
-        format.js do
-          render 'change_flag'
-        end
-      else
-        format.json { render json: @flag.errors, status: :unprocessable_entity }
-      end
-    end
-  end
-
-  # TODO: bento_only
-  # POST flag/:project(/:package)/:flag
-  def toggle_flag
-    authorize @main_object, :update?
-
-    @flag = Flag.find(params[:flag])
-    @flag.status = @flag.status == 'enable' ? 'disable' : 'enable'
-
-    respond_to do |format|
-      if @flag.save
-        # FIXME: This should happen in Flag or even better in Project
-        @main_object.store
-        format.html { redirect_to(action: :index, project: params[:project], package: params[:package]) }
-        format.js do
-          render 'change_flag'
-        end
-      else
-        format.json { render json: @flag.errors, status: :unprocessable_entity }
-      end
-    end
-  end
-
-  # TODO: bento_only
-  # DELETE flag/:project(/:package)/:flag
-  def remove_flag
-    authorize @main_object, :update?
-
-    @flag = Flag.find(params[:flag])
-    @main_object.flags.destroy(@flag)
-    @flag = @flag.dup
-    @flag.status = @flag.default_status
-
-    respond_to do |format|
-      # FIXME: This should happen in Flag or even better in Project
-      @main_object.store
-      format.html { redirect_to(action: :index, project: params[:project], package: params[:package]) }
-      format.js do
-        render 'change_flag'
-      end
-    end
-  end
-
-  # POST flag/change/:project(/:package)
-  # TODO: when removing bento, remove the extra 'change' from the route, for
-  # now we need to avoid the clash with create_flag
   def change_flag
     required_parameters :flag, :command
-    set_webui2_views
     authorize @main_object, :update?
 
     flag_type = params[:flag]
@@ -268,7 +183,7 @@ class Webui::RepositoriesController < Webui::WebuiController
     locals[:flags] = Flag::SpecifiedFlags.new(@main_object, flag_type)
     locals[:table_id] = 'flag_table_' + flag_type
 
-    render partial: 'shared/repositories_flag_table', locals: locals
+    render partial: 'webui/shared/repositories_flag_table', locals: locals
   end
 
   private

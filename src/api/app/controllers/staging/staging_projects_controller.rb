@@ -1,22 +1,28 @@
-class Staging::StagingProjectsController < ApplicationController
+class Staging::StagingProjectsController < Staging::StagingController
+  include Staging::Errors
+
   before_action :require_login, except: [:index, :show]
-  before_action :set_main_project
+  before_action :set_project
   before_action :set_staging_workflow, only: :create
+  before_action :set_options, only: [:index, :show]
+  before_action :set_staging_project, only: [:show, :accept]
 
   validate_action create: { method: :post, request: :staging_project }
 
   def index
-    if @main_project.staging
-      @staging_workflow = @main_project.staging
+    if @project.staging
+      @staging_workflow = @project.staging
       @staging_projects = @staging_workflow.staging_projects
     else
-      render_error status: 400, errcode: 'project_has_no_staging_workflow'
+      render_error(
+        status: 404,
+        errorcode: 'project_has_no_staging_workflow',
+        message: "No staging workflow for project '#{@project}'"
+      )
     end
   end
 
-  def show
-    @staging_project = @main_project.staging.staging_projects.find_by!(name: params[:name])
-  end
+  def show; end
 
   def create
     authorize @staging_workflow
@@ -28,41 +34,47 @@ class Staging::StagingProjectsController < ApplicationController
       render_error(
         status: 400,
         errorcode: 'invalid_request',
-        message: "Staging Projects for #{@main_project} failed: #{result.errors.join(' ')}"
+        message: "Staging Projects for #{@project} failed: #{result.errors.join(' ')}"
       )
     end
   end
 
   def copy
-    authorize @main_project.staging
+    authorize @project.staging
 
     StagingProjectCopyJob.perform_later(params[:staging_workflow_project], params[:staging_project_name], params[:staging_project_copy_name], User.session!.id)
     render_ok
   end
 
   def accept
-    staging_project = Project.find_by!(name: params[:staging_project_name])
-    authorize staging_project, :update?
+    authorize @staging_project, :accept?
+    authorize @project, :update?
 
-    if staging_project.overall_state != :acceptable
-      render_error(
-        status: 400,
-        errorcode: 'invalid_request',
-        message: 'Staging project is not in state acceptable.'
-      )
-      return
-    end
-    StagingProjectAcceptJob.perform_later(project_id: staging_project.id, user_login: User.session!.login)
+    # check general state
+    raise StagingProjectNotAcceptable, 'Staging project is not in state acceptable.' unless can_accept?
+    StagingProjectAcceptJob.perform_later(project_id: @staging_project.id, user_login: User.session!.login)
     render_ok
   end
 
   private
 
-  def set_main_project
-    @main_project = Project.find_by!(name: params[:staging_workflow_project])
+  def can_accept?
+    return true if @staging_project.overall_state == :acceptable
+    params[:force].present? && @staging_project.force_acceptable?
   end
 
-  def set_staging_workflow
-    @staging_workflow = @main_project.staging
+  def set_options
+    @options = {}
+    [:requests, :history, :status].each do |option|
+      @options[option] = params[option].present?
+    end
+  end
+
+  def set_staging_project
+    raise StagingWorkflowNotFound, "Staging Workflow for project \"#{@project.name}\" does not exist." unless @project.staging
+
+    @staging_project = @project.staging.staging_projects.find_by(name: params[:staging_project_name])
+    return if @staging_project
+    raise StagingProjectNotFound, "Staging Project \"#{params[:staging_project_name]}\" does not exist."
   end
 end

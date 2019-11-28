@@ -25,11 +25,9 @@ rescue SocketError
   hostname = ""
 end
 ipaddress = Socket.ip_address_list.find { |ai| ai.ipv4? && !ai.ipv4_loopback? }.ip_address
-if hostname.empty?
-  hostname = ipaddress
-end
+hostname = ipaddress if hostname.empty?
 
-Capybara.app_host = ENV['SMOKETEST_HOST'].nil? ? "https://#{hostname}" : "http://localhost:3000"
+Capybara.app_host = ENV.fetch('SMOKETEST_HOST', "https://#{hostname}")
 
 RSpec.configure do |config|
   config.include Capybara::DSL

@@ -36,7 +36,7 @@ RSpec.describe BsRequest, vcr: true do
     end
   end
 
-  context '.new_from_xml' do
+  describe '.new_from_xml' do
     let(:user) { create(:user, :with_home) }
     let(:review_request) do
       create(:bs_request_with_submit_action,
@@ -127,7 +127,7 @@ RSpec.describe BsRequest, vcr: true do
     it 'fails with reasonable error' do
       expect { request.addreview(by_user: 'NOEXIST') }.to raise_error do |exception|
         expect(exception).to be_a(BsRequest::InvalidReview)
-        expect(exception.message.to_s).to eq('Review invalid: By user NOEXIST not found')
+        expect(exception.message.to_s).to eq("Review invalid: User can't be blank")
       end
     end
   end
@@ -478,7 +478,7 @@ RSpec.describe BsRequest, vcr: true do
     end
   end
 
-  context '#forward_to' do
+  describe '#forward_to' do
     before do
       submit_request.bs_request_actions.first.update(sourceupdate: 'cleanup')
       login user

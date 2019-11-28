@@ -84,7 +84,7 @@ fi										\
 }
 %endif
 
-%global obs_api_support_scripts obs-api-support.target obs-clockwork.service obs-delayedjob-queue-consistency_check.service obs-delayedjob-queue-default.service obs-delayedjob-queue-issuetracking.service obs-delayedjob-queue-mailers.service obs-delayedjob-queue-project_log_rotate.service obs-delayedjob-queue-releasetracking.service obs-delayedjob-queue-staging.service obs-sphinx.service
+%global obs_api_support_scripts obs-api-support.target obs-clockwork.service obs-delayedjob-queue-consistency_check.service obs-delayedjob-queue-default.service obs-delayedjob-queue-issuetracking.service obs-delayedjob-queue-mailers.service obs-delayedjob-queue-project_log_rotate.service obs-delayedjob-queue-releasetracking.service obs-delayedjob-queue-staging.service obs-delayedjob-queue-sphinx-indexing.service obs-sphinx.service
 
 Name:           obs-server
 Summary:        The Open Build Service -- Server Component
@@ -113,6 +113,7 @@ BuildRequires:  perl-TimeDate
 BuildRequires:  perl-XML-Parser
 BuildRequires:  perl-XML-Simple
 BuildRequires:  perl-XML-Structured
+BuildRequires:  perl-YAML-LibYAML
 BuildRequires:  procps
 BuildRequires:  timezone
 BuildRequires:  perl(Devel::Cover)
@@ -120,7 +121,7 @@ BuildRequires:  perl(Test::Simple) > 1
 PreReq:         /usr/sbin/useradd /usr/sbin/groupadd
 BuildArch:      noarch
 Requires(pre):  obs-common
-Requires:       build >= 20181031
+Requires:       build >= 20191114
 Requires:       perl-BSSolv >= 0.28
 Requires:       perl(Date::Parse)
 # Required by source server
@@ -129,6 +130,8 @@ PreReq:         git-core
 Requires:       patch
 Requires:       createrepo_c
 Recommends:     cron logrotate
+# zsync for appimage signing
+Recommends:     zsync
 
 Obsoletes:      obs-devel
 Provides:       obs-devel
@@ -161,6 +164,7 @@ Requires:       perl-Socket-MsgHdr
 Requires:       perl-XML-Parser
 Requires:       perl-XML-Simple
 Requires:       perl-XML-Structured
+Requires:       perl-YAML-LibYAML
 
 Obsoletes:      obs-productconverter < 2.9
 Obsoletes:      obs-source_service < 2.9
@@ -361,9 +365,9 @@ mkdir -p $RPM_BUILD_ROOT/etc/obs/cloudupload/.aws
 install -m 644 $RPM_BUILD_DIR/open-build-service-%version/dist/aws_credentials.example $RPM_BUILD_ROOT/etc/obs/cloudupload/.aws/credentials
 
 # Link the assets without hash to make them accessible for third party tools like the pattern library
-pushd $RPM_BUILD_ROOT/srv/www/obs/api/public/assets/webui2/
+pushd $RPM_BUILD_ROOT/srv/www/obs/api/public/assets/webui/
 ln -sf application-*.js application.js
-ln -sf webui2-*.css webui2.css
+ln -sf application-*.css application.css
 popd
 
 %check
@@ -570,7 +574,11 @@ getent passwd obsapidelayed >/dev/null || \
 
 # On upgrade keep the values for the %post script
 if [ "$1" == 2 ]; then
-  systemctl --quiet is-enabled obsapidelayed.service && touch %{_rundir}/enable_obs-api-support.target
+  # Cannot use "sytemctl is-enabled obsapidelayed.service" here
+  # as it throws an error like "Can't determine current runlevel"
+  if [ -e /etc/init.d/rc3.d/S50obsapidelayed ];then
+    touch %{_rundir}/enable_obs-api-support.target
+  fi
   if systemctl --quiet is-active  obsapidelayed.service;then
     touch %{_rundir}/start_obs-api-support.target
     systemctl stop    obsapidelayed.service
@@ -613,6 +621,8 @@ chown %{apache_user}:%{apache_group} /srv/www/obs/api/log/production.log
 touch /srv/www/obs/api/last_deploy || true
 
 # Upgrading from SysV obsapidelayed.service to systemd obs-api-support.target
+# This must be done after %%service_add_post. Otherwise the distribution preset is
+# take, which is disabled in case of obs-api-support.target
 if [ -e %{_rundir}/enable_obs-api-support.target ];then
   systemctl enable obs-api-support.target
   rm %{_rundir}/enable_obs-api-support.target
@@ -699,6 +709,7 @@ fi
 /usr/lib/obs/server/bs_notifyforward
 /usr/lib/obs/server/worker
 /usr/lib/obs/server/worker-deltagen.spec
+/usr/lib/obs/server/obs-ptf.spec
 %config(noreplace) /usr/lib/obs/server/BSConfig.pm
 %config(noreplace) /etc/slp.reg.d/*
 # created via %%post, since rpm fails otherwise while switching from
@@ -714,11 +725,15 @@ fi
 %attr(0755, obsrun, obsrun) %dir %{obs_backend_data_dir}/projects
 %attr(0775, obsrun, obsrun) %dir %{obs_backend_data_dir}/run
 %attr(0755, obsservicerun, obsrun) %dir %{obs_backend_data_dir}/service
+%attr(0755, obsservicerun, obsrun) %dir %{obs_backend_data_dir}/service/log
 
 
 # formerly obs-source_service
 %{_unitdir}/obsservice.service
 %config(noreplace) /etc/logrotate.d/obs-source_service
+%if 0%{?suse_version} >= 1550
+%dir /etc/cron.d
+%endif
 %config(noreplace) /etc/cron.d/cleanup_scm_cache
 /usr/sbin/rcobsservice
 /usr/lib/obs/server/bs_service
@@ -782,6 +797,7 @@ usermod -a -G docker obsservicerun
 %{_unitdir}/obs-delayedjob-queue-quick@.service
 %{_unitdir}/obs-delayedjob-queue-releasetracking.service
 %{_unitdir}/obs-delayedjob-queue-staging.service
+%{_unitdir}/obs-delayedjob-queue-sphinx-indexing.service
 %{_unitdir}/obs-sphinx.service
 %{_sbindir}/rcobs-api-support
 %{_sbindir}/rcobs-clockwork
@@ -792,6 +808,7 @@ usermod -a -G docker obsservicerun
 %{_sbindir}/rcobs-delayedjob-queue-project_log_rotate
 %{_sbindir}/rcobs-delayedjob-queue-releasetracking
 %{_sbindir}/rcobs-delayedjob-queue-staging
+%{_sbindir}/rcobs-delayedjob-queue-sphinx-indexing
 %{_sbindir}/rcobs-sphinx
 %{_sbindir}/rcobsapisetup
 /srv/www/obs/api/app
@@ -822,6 +839,7 @@ usermod -a -G docker obsservicerun
 
 /srv/www/obs/api/config/boot.rb
 /srv/www/obs/api/config/routes.rb
+/srv/www/obs/api/config/routes
 /srv/www/obs/api/config/environments/development.rb
 %attr(0640,root,%apache_group) %config(noreplace) %verify(md5) /srv/www/obs/api/config/database.yml
 %attr(0640,root,%apache_group) /srv/www/obs/api/config/database.yml.example

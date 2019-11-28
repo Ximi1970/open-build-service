@@ -305,6 +305,8 @@ PUT /source/<project>/_meta
 
   Write project meta file.
 
+  If the project does not exist, create it.
+
 Parameters:
 
   comment: comment, optional
@@ -549,6 +551,8 @@ PUT /source/<project>/<package>/_meta
 
   Write project meta data. Writing of the project meta data commits the packages
   contained in the project to the build backend.
+
+  If the package does not exist, create it.
 
 Parameters:
 
@@ -1269,6 +1273,7 @@ Parameters:
 
   nostream: do not hang if the build is currently running
   last: show log from last finished build
+  lastsucceeded: show last succeeded log
   start: start at a given number of bytes
   end: stop after the given number of bytes
   view: special view instead of plain logfile. "entry" shows the size and mtime of logfile.
@@ -1936,20 +1941,34 @@ DELETE /staging/<staging_workflow_project>/workflow
   Delete a staging workflow associated to a given project.
 XmlResult: status_ok
 
-GET /staging/<staging_workflow_project>/staging_projects
-  Get the overall state of all staging projects belonging to a staging workflow project
+GET /staging/<staging_workflow_project>/staging_projects?requests=1&status=1&history=1
+  Get the overall state of all staging projects belonging to a staging workflow project.
+  Extra information can be requested by adding any combination of these parameters in the URL: requests, status and history.
+
+  - If requests is present, the output includes the staged, untracked and obsolete requests as well as missing reviews.
+  - If status is present, the output includes the overall state and the status xml (broken packages, missing reviews, checks, etc.)
+  - If history is present, the output includes the history of the staging project.
+
 XmlResult: staging_projects
 
-GET /staging/<staging_workflow_project>/staging_projects/<staging_project>
-  Get the overall state of a staging project
+GET /staging/<staging_workflow_project>/staging_projects/<staging_project>?requests=1&status=1&history=1
+  Get the overall state of a staging project.
+  Extra information can be requested by adding any combination of these parameters in the URL: requests, status and history.
+
+  - If requests is present, the output includes the staged, untracked and obsolete requests as well as missing reviews.
+  - If status is present, the output includes the overall state and the status xml (broken packages, missing reviews, checks, etc.)
+  - If history is present, the output includes the history of the staging project.
+
 XmlResult: staging_project
 
 POST /staging/<staging_workflow_project>/staging_projects/<staging_project>/copy/<staging_project_copy_name>
   Copy a staging project
 XmlResult: status_ok
 
-POST /staging/<staging_workflow_project>/staging_projects/<staging_project>/accept
+POST /staging/<staging_workflow_project>/staging_projects/<staging_project>/accept?force=1
   Accept staging project. This accepts all staged requests and sets the project state back to 'empty'.
+  Will return in an error if staging project is not acceptable, unless force is given. You can force
+   accept staging projects with building or failing packages, but not with missing reviews
 XmlResult: status_ok
 
 POST /staging/<staging_workflow_project>/staging_projects
@@ -1957,9 +1976,18 @@ POST /staging/<staging_workflow_project>/staging_projects
 XmlBody: create_staging_projects
 XmlResult: status_ok
 
+
+=== Backlog
+
+<staging_workflow_project>: The name of the staging workflow project, e.g. home:user1
+
+GET /staging/<staging_workflow_project>/backlog
+  Get the list of requests that are not added into any staging project or excluded.
+XmlResult: backlog
+
 === Excluded Requests
 
-<project>: The name of the main project of a Staging, e.g. openSUSE_Tumbleweed
+<project>: The name of the main project of a Staging, e.g. openSUSE:Factory
 <request>: The number of the request, e.g. 12345
 <description>: A string of text (url encoded)
 
@@ -1987,16 +2015,18 @@ GET /staging/<staging_workflow_project>/staging_projects/<staging_project>/stage
 XmlResult: staged_requests
 
 POST /staging/<staging_workflow_project>/staging_projects/<staging_project>/staged_requests
-  Add one or multiple bs_requests to the staged requests of a staging project.
+  Add one or multiple bs_requests to the staged requests of a staging project
+  remove_exclusion: removes the request from exclusion request before staging it.
+
 XmlBody: remove_staged_requests
 XmlResult: status_ok
 
-DELETE /staging/<staging_workflow_project>/staging_projects/<staging_project>/staged_requests
-  Remove one or multiple bs_requests to the staged requests of a staging project.
+DELETE /staging/<staging_workflow_project>/staged_requests
+  Remove requests from the staging projects they are staged in.
+XmlBody: remove_staged_requests
 XmlResult: status_ok
 
 == Internal only routes
 
-/public shall not be used in any tools, it is for OBS remote support only and may
-change or disappear at any time. The route is only working when anonymous mode is enabled.
+   /public shall not be used in any tools, it is for OBS remote support only and may change or disappear at any time. The route is only working when anonymous mode is enabled.
 

@@ -1,9 +1,0 @@
-%ul
-  - elements.each do |element|
-    %li
-      = element.event_type.humanize
-      - case element.event_type
-      - when 'unstaged_request', 'staged_request'
-        = render(partial: 'unstaged_staged_request_history', locals: { history: element })
-      - when 'staging_project_created'
-        = render(partial: 'staging_project_created_history', locals: { history: element })

@@ -167,6 +167,7 @@ RSpec.describe Webui::RepositoriesController, vcr: true do
           'Name is too short (minimum is 1 character) and ' \
           "Name must not start with '_' or contain any of these characters ':/'")
       }
+
       it { is_expected.to redirect_to(root_url) }
       it { expect(assigns(:project).repositories.count).to eq(0) }
     end
@@ -206,8 +207,7 @@ RSpec.describe Webui::RepositoriesController, vcr: true do
         end
 
         it { expect(assigns(:error)).to start_with('Repository with name') }
-        # FIXME: Remove 'have_http_status(:success)' after old webui got dropped
-        it { expect(response).to have_http_status(:success).or(have_http_status(:redirect)) }
+        it { expect(response).to have_http_status(:redirect) }
       end
 
       context 'with no valid repository type' do
@@ -219,8 +219,7 @@ RSpec.describe Webui::RepositoriesController, vcr: true do
         end
 
         it { expect(assigns(:error)).to start_with("Couldn't add repository:") }
-        # FIXME: Remove 'have_http_status(:success)' after old webui got dropped
-        it { expect(response).to have_http_status(:success).or(have_http_status(:redirect)) }
+        it { expect(response).to have_http_status(:redirect) }
       end
 
       context 'with no valid repository Architecture' do
@@ -232,8 +231,7 @@ RSpec.describe Webui::RepositoriesController, vcr: true do
         end
 
         it { expect(assigns(:error)).to start_with("Couldn't add repository:") }
-        # FIXME: Remove 'have_http_status(:success)' after old webui got dropped
-        it { expect(response).to have_http_status(:success).or(have_http_status(:redirect)) }
+        it { expect(response).to have_http_status(:redirect) }
       end
 
       context 'with valid repository data' do
@@ -245,8 +243,7 @@ RSpec.describe Webui::RepositoriesController, vcr: true do
         end
 
         it { expect(assigns(:error)).to be_nil }
-        # FIXME: Remove 'have_http_status(:success)' after old webui got dropped
-        it { expect(response).to have_http_status(:success).or(have_http_status(:redirect)) }
+        it { expect(response).to have_http_status(:redirect) }
       end
     end
   end

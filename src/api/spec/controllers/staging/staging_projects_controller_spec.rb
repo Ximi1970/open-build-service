@@ -26,17 +26,29 @@ RSpec.describe Staging::StagingProjectsController do
         get :index, params: { staging_workflow_project: project_without_staging.name, format: :xml }
       end
 
-      it { expect(response).to have_http_status(:bad_request) }
+      it { expect(response).to have_http_status(:not_found) }
     end
   end
 
   describe 'GET #show' do
-    context 'not existing project' do
+    context 'not existing staging workflow' do
       before do
-        get :show, params: { staging_workflow_project: staging_workflow.project.name, name: 'does-not-exist', format: :xml }
+        get :show, params: { staging_workflow_project: project_without_staging.name, staging_project_name: staging_project.name, format: :xml }
       end
 
       it { expect(response).to have_http_status(:not_found) }
+      it { expect(response.body).to include("Staging Workflow for project \"#{project_without_staging.name}\" does not exist.") }
+    end
+
+    context 'not existing staging project' do
+      let(:staging_project_name) { 'non-existent' }
+
+      before do
+        get :show, params: { staging_workflow_project: staging_workflow.project.name, staging_project_name: staging_project_name, format: :xml }
+      end
+
+      it { expect(response).to have_http_status(:not_found) }
+      it { expect(response.body).to include("Staging Project \"#{staging_project_name}\" does not exist.") }
     end
 
     context 'valid project' do
@@ -80,32 +92,139 @@ RSpec.describe Staging::StagingProjectsController do
       before do
         stub_request(:get, broken_packages_path).and_return(body: broken_packages_backend)
         # staging select
+        login(user)
         bs_request_to_review.change_review_state(:accepted, by_group: staging_workflow.managers_group.title)
         bs_request_missing_review.change_review_state(:accepted, by_group: staging_workflow.managers_group.title)
         untracked_request.change_review_state(:accepted, by_group: staging_workflow.managers_group.title)
         bs_request.change_review_state(:accepted, by_group: staging_workflow.managers_group.title)
-        get :show, params: { staging_workflow_project: staging_workflow.project.name, name: staging_project.name, format: :xml }
+        logout
       end
 
-      it { expect(response).to have_http_status(:success) }
-      it 'returns the staging_project name xml' do
-        assert_select 'staging_project' do
-          assert_select 'staged_requests', 1 do
-            assert_select 'entry', 3
+      context 'without requesting extra information' do
+        before do
+          get :show, params: { staging_workflow_project: staging_workflow.project.name, staging_project_name: staging_project.name, format: :xml }
+        end
+
+        it { expect(response).to have_http_status(:success) }
+
+        it { expect(response.body).not_to include("<staging_project name=\"#{staging_project.name}\" state=") }
+
+        it 'returns the staging_project default xml' do
+          assert_select 'staging_project' do
+            assert_select 'staged_requests', 0
+            assert_select 'untracked_requests', 0
+            assert_select 'obsolete_requests', 0
+            assert_select 'missing_reviews', 0
+            assert_select 'broken_packages', 0
+            assert_select 'checks', 0
+            assert_select 'history', 0
           end
-          assert_select 'untracked_requests', 1 do
-            assert_select 'entry', 1
+        end
+      end
+
+      context 'with requests' do
+        before do
+          get :show, params: { staging_workflow_project: staging_workflow.project.name, staging_project_name: staging_project.name,
+                               requests: 1, format: :xml }
+        end
+
+        it { expect(response).to have_http_status(:success) }
+
+        it { expect(response.body).not_to include("<staging_project name=\"#{staging_project.name}\" state=") }
+
+        it 'returns the staging_project with requests xml' do
+          assert_select 'staging_project' do
+            assert_select 'staged_requests', 1 do
+              assert_select 'request', 3
+            end
+            assert_select 'untracked_requests', 1 do
+              assert_select 'request', 1
+            end
+            assert_select 'obsolete_requests', 1
+            assert_select 'missing_reviews', 1 do
+              assert_select 'review', 1
+            end
+            assert_select 'broken_packages', 0
+            assert_select 'checks', 0
+            assert_select 'history', 0
           end
-          assert_select 'requests_to_review', 1 do
-            assert_select 'entry', 2
+        end
+      end
+
+      context 'with status info' do
+        before do
+          get :show, params: { staging_workflow_project: staging_workflow.project.name, staging_project_name: staging_project.name,
+                               status: 1, format: :xml }
+        end
+
+        it { expect(response).to have_http_status(:success) }
+
+        it { expect(response.body).to include("<staging_project name=\"#{staging_project.name}\" state=") }
+
+        it 'returns the staging_project with status xml' do
+          assert_select 'staging_project' do
+            assert_select 'staged_requests', 0
+            assert_select 'untracked_requests', 0
+            assert_select 'obsolete_requests', 0
+            assert_select 'missing_reviews', 0
+            assert_select 'broken_packages', 1 do
+              assert_select 'package', 1
+            end
+            assert_select 'checks', 1
+            assert_select 'history', 0
           end
-          assert_select 'missing_reviews', 1 do
-            assert_select 'entry', 1
+        end
+      end
+
+      context 'with history' do
+        before do
+          get :show, params: { staging_workflow_project: staging_workflow.project.name, staging_project_name: staging_project.name,
+                               history: 1, format: :xml }
+        end
+
+        it { expect(response).to have_http_status(:success) }
+
+        it { expect(response.body).not_to include("<staging_project name=\"#{staging_project.name}\" state=") }
+
+        it 'returns the staging_project with history xml' do
+          assert_select 'staging_project' do
+            assert_select 'staged_requests', 0
+            assert_select 'untracked_requests', 0
+            assert_select 'obsolete_requests', 0
+            assert_select 'missing_reviews', 0
+            assert_select 'broken_packages', 0
+            assert_select 'history', 1
           end
-          assert_select 'broken_packages', 1 do
-            assert_select 'entry', 2
+        end
+      end
+
+      context 'with requests, status, history' do
+        before do
+          get :show, params: { staging_workflow_project: staging_workflow.project.name, staging_project_name: staging_project.name,
+                               requests: 1, status: 1, history: 1, format: :xml }
+        end
+
+        it { expect(response).to have_http_status(:success) }
+
+        it { expect(response.body).to include("<staging_project name=\"#{staging_project.name}\" state=") }
+
+        it 'returns the staging_project with requests, status and history xml' do
+          assert_select 'staging_project' do
+            assert_select 'staged_requests', 1 do
+              assert_select 'request', 3
+            end
+            assert_select 'untracked_requests', 1 do
+              assert_select 'request', 1
+            end
+            assert_select 'obsolete_requests', 1
+            assert_select 'missing_reviews', 1 do
+              assert_select 'review', 1
+            end
+            assert_select 'broken_packages', 1 do
+              assert_select 'package', 1
+            end
+            assert_select 'history', 1
           end
-          assert_select 'history', 1
         end
       end
     end
@@ -143,55 +262,104 @@ RSpec.describe Staging::StagingProjectsController do
   describe 'POST #accept' do
     render_views
 
-    let(:params) { { staging_workflow_project: staging_workflow.project.name, staging_project_name: staging_project.name } }
+    let(:params) { { staging_workflow_project: staging_workflow.project.name, staging_project_name: staging_project_name } }
 
     before do
       login user
       staging_workflow
     end
 
-    context 'when staging project is not ready to be accepted' do
+    context 'when staging project does not exist' do
+      let(:staging_project_name) { 'non-existent' }
+
+      subject! do
+        post :accept, params: params, format: :xml
+      end
+
+      it { is_expected.to have_http_status(:not_found) }
+      it { expect(response.body).to match('Staging Project "non-existent" does not exist.') }
+    end
+
+    context 'when staging project is empty' do
+      let(:staging_project_name) { staging_project.name }
+
       subject! do
         post :accept, params: params, format: :xml
       end
 
       it { is_expected.to have_http_status(:bad_request) }
       it { expect(response.body).to match('Staging project is not in state acceptable.') }
+
+      context 'with force parameter' do
+        subject! do
+          post :accept, params: params.merge(force: true), format: :xml
+        end
+
+        it 'still fails' do
+          expect(subject).to have_http_status(:bad_request)
+        end
+      end
     end
 
-    context 'when project is in state acceptable', vcr: true do
+    context 'when project has a request', vcr: true do
+      let(:staging_owner) { create(:confirmed_user, login: 'staging-hero') }
+      let(:staging_project_name) { staging_project.name }
       let(:requester) { create(:confirmed_user, login: 'requester') }
       let(:target_project) { create(:project, name: 'target_project') }
       let(:source_project) { create(:project, :as_submission_source, name: 'source_project') }
       let(:target_package) { create(:package, name: 'target_package', project: target_project) }
       let(:source_package) { create(:package, name: 'source_package', project: source_project) }
-      let!(:user_relationship) { create(:relationship, project: target_project, user: user) }
+      let!(:target_relationship) { create(:relationship, project: target_project, user: user) }
+      let!(:staging_relationship) { create(:relationship, project: staging_project, user: staging_owner) }
       let!(:staged_request_1) do
         create(
           :bs_request_with_submit_action,
-          state: :new,
+          review_by_project: staging_project,
           creator: requester,
           description: 'Fixes issue #42',
           target_package: target_package,
           source_package: source_package,
           staging_project: staging_project,
-          staging_owner: user
+          staging_owner: staging_owner
         )
       end
 
       before do
         allow(StagingProjectAcceptJob).to receive(:perform_later)
-        User.session = user
       end
 
       subject do
         post :accept, params: params, format: :xml
       end
 
-      it { is_expected.to have_http_status(:success) }
-      it "starts the 'accept' job for the staging projects" do
-        subject
-        expect(StagingProjectAcceptJob).to have_received(:perform_later).with(project_id: staging_project.id, user_login: user.login)
+      context 'with nothing missing' do
+        it { is_expected.to have_http_status(:success) }
+
+        it "starts the 'accept' job for the staging projects" do
+          subject
+          expect(StagingProjectAcceptJob).to have_received(:perform_later).with(project_id: staging_project.id, user_login: user.login)
+        end
+
+        context 'as staging owner' do
+          before do
+            login staging_owner
+          end
+
+          it "can't accept" do
+            expect(subject).to have_http_status(403)
+          end
+        end
+      end
+
+      context 'with missing check' do
+        let!(:repo) { create(:repository, project: staging_project, name: 'standard', architectures: ['local'], required_checks: ['theone']) }
+
+        it { is_expected.to have_http_status(:bad_request) }
+
+        it 'returns correct error' do
+          subject
+          expect(response.body).to match('Staging project is not in state acceptable.')
+        end
       end
     end
   end

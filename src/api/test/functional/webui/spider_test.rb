@@ -4,6 +4,28 @@ require 'benchmark'
 require 'nokogiri'
 
 class Webui::SpiderTest < Webui::IntegrationTest
+  def ignore_link?(link)
+    return true if link =~ %r{/mini-profiler-resources}
+    # that link is just a top ref
+    return true if link.end_with?('/package/rdiff')
+    # admin can see even the hidden
+    return true if link.end_with?('/package/show/HiddenRemoteInstance')
+    return true if link =~ %r{/package/show/SourceprotectedProject}
+    # this is crashing (bug)
+    return true if link =~ %r{/package/show/UseRemoteInstance}
+    return true if link.end_with?('/project/show/HiddenRemoteInstance')
+    return true if link.end_with?('/project/show/RemoteInstance')
+    return true if link.end_with?('/package/show/BaseDistro3/pack2')
+    return true if link.end_with?('/package/show/home:Iggy/TestPack')
+    return true if link.end_with?('/project/show/home:user6')
+    return true if link =~ %r{/live_build_log/BinaryprotectedProject}
+    return true if link =~ %r{/live_build_log/SourceprotectedProject}
+    return true if link =~ %r{/live_build_log/home:Iggy/ToBeDeletedTestPack}
+    return true if link =~ %r{/live_build_log}
+    # we do not really serve binary packages in the test environment
+    return true if link =~ %r{/package/binary/}
+  end
+
   def getlinks(baseuri, body)
     # skip some uninteresting projects
     return if baseuri =~ %r{project=home%3Afred}
@@ -29,52 +51,16 @@ class Webui::SpiderTest < Webui::IntegrationTest
       next unless link.host == baseuri.host
       next unless link.port == baseuri.port
       link = link.to_s
-      next if link =~ %r{/mini-profiler-resources}
-      # that link is just a top ref
-      next if link.end_with?('/package/rdiff')
-      # admin can see even the hidden
-      next if link.end_with?('/package/show/HiddenRemoteInstance')
-      next if link.end_with?('/project/show/HiddenRemoteInstance')
-      next if link.end_with?('/project/show/RemoteInstance')
-      next if link.end_with?('/package/show/BaseDistro3/pack2')
-      next if link.end_with?('/package/show/home:Iggy/TestPack')
-      next if link.end_with?('/project/show/home:user6')
-      next if link =~ %r{/live_build_log/BinaryprotectedProject}
-      next if link =~ %r{/live_build_log/SourceprotectedProject}
-      next if link =~ %r{/live_build_log/home:Iggy/ToBeDeletedTestPack}
-      next if link =~ %r{/live_build_log}
+      next if ignore_link?(link)
       next if tag.content == 'show latest'
-      unless @pages_visited.key?(link)
-        @pages_to_visit[link] ||= [baseuri.to_s, tag.content]
-      end
+      next if @pages_visited.key?(link)
+      next if @pages_to_visit.key?(link)
+      @pages_to_visit[link] = [baseuri.to_s, tag.content]
     end
   end
 
   def raiseit(message, url)
     # known issues
-    return if url =~ %r{/package/binary/BinaryprotectedProject/.*}
-    return if url =~ %r{/package/binary/download/*}
-    return if url =~ %r{/package/statistics/BinaryprotectedProject/.*}
-    return if url =~ %r{/package/statistics/SourceprotectedProject/.*}
-    return if url.end_with?('/package/binary/SourceprotectedProject/pack?arch=i586&filename=package-1.0-1.src.rpm&repository=repo')
-    return if url =~ %r{/package/revisions/SourceprotectedProject.*}
-    return if url.end_with?('/package/show/kde4/kdelibs?rev=1')
-    return if url.end_with?('/package/show/SourceprotectedProject/target')
-    return if url.end_with?('/package/users/SourceprotectedProject/pack')
-    return if url.end_with?('/package/view_file/BaseDistro:Update/pack2?file=my_file&rev=1')
-    return if url.end_with?('/package/view_file/Devel:BaseDistro:Update/pack2?file=my_file&rev=1')
-    return if url.end_with?('/package/view_file/Devel:BaseDistro:Update/Pack3?file=my_file&rev=1')
-    return if url.end_with?('/package/view_file/LocalProject/remotepackage?file=my_file&rev=1')
-    return if url.end_with?('/package/view_file/BaseDistro2.0:LinkedUpdateProject/pack2.linked?file=myfile&rev=1')
-    return if url.end_with?('/package/view_file/BaseDistro2.0/pack2.linked?file=myfile&rev=1')
-    return if url.end_with?('/package/view_file/BaseDistro2.0:LinkedUpdateProject/pack2.linked?file=package.spec&rev=1')
-    return if url.end_with?('/package/view_file/BaseDistro2.0/pack2.linked?file=package.spec&rev=1')
-    return if url.end_with?('/project/edit/RemoteInstance')
-    return if url.end_with?('/project/meta/HiddenRemoteInstance')
-    return if url.end_with?('/project/show/HiddenRemoteInstance')
-    return if url.end_with?('/project/edit/HiddenRemoteInstance')
-    return if url.end_with?('/user/show/unknown')
-    return if url.end_with?('/user/show/deleted')
     return if url =~ %r{/source/}
 
     warn "Found #{message} on #{url}, crawling path"
@@ -89,13 +75,14 @@ class Webui::SpiderTest < Webui::IntegrationTest
   end
 
   def crawl
+    load_sitemap('/sitemaps')
     until @pages_to_visit.empty?
       theone = @pages_to_visit.keys.min
       @pages_visited[theone] = @pages_to_visit[theone]
       @pages_to_visit.delete theone
 
       begin
-        # puts "V #{theone} #{@pages_to_visit.length}/#{@pages_visited.keys.length+@pages_to_visit.length}"
+        # puts "V #{theone} #{@pages_to_visit.length}/#{@pages_visited.keys.length + @pages_to_visit.length}"
         page.visit(theone)
         if page.status_code != 200
           raiseit("Status code #{page.status_code}", theone)
@@ -105,7 +92,7 @@ class Webui::SpiderTest < Webui::IntegrationTest
           # puts "ignoring #{page.response_headers.inspect}"
           next
         end
-        page.first(:id, 'header-logo')
+        page.first('.navbar-brand')
       rescue Timeout::Error
         next
       rescue ActionController::RoutingError
@@ -119,7 +106,7 @@ class Webui::SpiderTest < Webui::IntegrationTest
         # puts "HARDCORE!! #{theone}"
       end
       next unless body
-      flashes = body.css('div#flash-messages div.ui-state-error')
+      flashes = body.css('div#flash div.alert-error')
       unless flashes.empty?
         raiseit("flash alert #{flashes.first.content.strip}", theone)
       end
@@ -138,6 +125,19 @@ class Webui::SpiderTest < Webui::IntegrationTest
     end
   end
 
+  def load_sitemap(url)
+    page.visit(url)
+    return unless page.status_code == 200
+    r = Xmlhash.parse(page.source)
+    r.elements('sitemap') do |s|
+      load_sitemap(s['loc'])
+    end
+    r.elements('url') do |s|
+      next if ignore_link?(s['loc'])
+      @pages_to_visit[s['loc']] = [url, 'sitemap']
+    end
+  end
+
   def setup
     Backend::Test.start(wait_for_scheduler: true)
   end
@@ -150,7 +150,7 @@ class Webui::SpiderTest < Webui::IntegrationTest
     crawl
     ActiveRecord::Base.clear_active_connections!
 
-    @pages_visited.keys.length.must_be :>, 490
+    @pages_visited.keys.length.must_be :>, 800
   end
 
   def test_spider_as_admin
@@ -161,6 +161,6 @@ class Webui::SpiderTest < Webui::IntegrationTest
     crawl
     ActiveRecord::Base.clear_active_connections!
 
-    @pages_visited.keys.length.must_be :>, 900
+    @pages_visited.keys.length.must_be :>, 1200
   end
 end

@@ -10,7 +10,7 @@ RSpec.feature "User's home project creation", type: :feature, js: true do
 
   describe 'as an anonymous user' do
     before do
-      visit user_show_path(user)
+      visit user_path(user)
     end
 
     scenario 'view home page of another user' do
@@ -29,7 +29,7 @@ RSpec.feature "User's home project creation", type: :feature, js: true do
   describe 'as a logged-in user' do
     before do
       login user
-      visit home_path
+      visit user_path(user)
     end
 
     scenario 'view home page' do
@@ -45,7 +45,7 @@ RSpec.feature "User's home project creation", type: :feature, js: true do
     end
 
     scenario 'view tasks page' do
-      visit user_tasks_path(user)
+      visit my_tasks_path
 
       expect(page).to have_link('Incoming Requests')
       expect(page).to have_link('Outgoing Requests')
@@ -65,19 +65,6 @@ RSpec.feature "User's home project creation", type: :feature, js: true do
       expect(page).to have_text("User data for user 'Jim' successfully updated.")
       expect(page).to have_css('#home-realname', text: 'John Doe')
       expect(page).to have_css("a[href='mailto:john.doe@opensuse.org']", text: 'john.doe@opensuse.org')
-    end
-
-    scenario 'public beta program' do
-      # TODO: Change by have_text('In public beta program') when dropping old UI
-      expect(page).not_to have_content(/(Participates in|In) public beta program/)
-
-      click_link('Join public beta program')
-      expect(page).to have_text("User data for user 'Jim' successfully updated.")
-      expect(page).to have_content(/(Participates in|In) public beta program/)
-
-      click_link('Leave public beta program')
-      expect(page).to have_text("User data for user 'Jim' successfully updated.")
-      expect(page).not_to have_content(/(Participates in|In) public beta program/)
     end
   end
 end

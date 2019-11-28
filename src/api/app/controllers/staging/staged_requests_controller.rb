@@ -1,7 +1,10 @@
-class Staging::StagedRequestsController < ApplicationController
-  before_action :require_login, except: [:index]
-  before_action :set_staging_project
-  before_action :set_staging_workflow, :set_project, :check_overall_state, only: [:create, :destroy]
+class Staging::StagedRequestsController < Staging::StagingController
+  before_action :require_login, except: :index
+  before_action :set_project
+  before_action :set_staging_workflow
+  before_action :set_staging_project, except: :destroy
+  before_action :check_overall_state, only: :create
+  before_action :set_xml_hash, :set_request_numbers, only: [:create, :destroy]
 
   validate_action create: { method: :post, request: :number, response: :number }, destroy: { method: :delete, request: :number, response: :number }
 
@@ -10,33 +13,31 @@ class Staging::StagedRequestsController < ApplicationController
   end
 
   def create
-    authorize @staging_project, :update?
+    authorize @staging_workflow, policy_class: Staging::StagedRequestPolicy
 
-    result = ::Staging::StageRequests.new(
-      request_numbers: request_numbers,
+    if params[:remove_exclusion]
+      ::Staging::RequestExcluder
+        .new(requests_xml_hash: @parsed_xml,
+             staging_workflow: @staging_workflow)
+        .destroy!
+    end
+
+    ::Staging::StagedRequests.new(
+      request_numbers: @request_numbers,
       staging_workflow: @staging_workflow,
       staging_project: @staging_project,
       user_login: User.session!.login
-    ).create
+    ).create!
 
-    if result.valid?
-      render_ok
-    else
-      render_error(
-        status: 400,
-        errorcode: 'invalid_request',
-        message: "Assigning requests to #{@staging_project} failed: #{result.errors.to_sentence}."
-      )
-    end
+    render_ok
   end
 
   def destroy
-    authorize @staging_project, :update?
+    authorize @staging_workflow, policy_class: Staging::StagedRequestPolicy
 
-    result = ::Staging::StageRequests.new(
-      request_numbers: request_numbers,
+    result = ::Staging::StagedRequests.new(
+      request_numbers: @request_numbers,
       staging_workflow: @staging_workflow,
-      staging_project: @staging_project,
       user_login: User.session!.login
     ).destroy
 
@@ -53,30 +54,25 @@ class Staging::StagedRequestsController < ApplicationController
 
   private
 
-  def request_numbers
-    xml_hash.elements('number')
-  end
+  def set_request_numbers
+    @request_numbers = [@parsed_xml[:request]].flatten.map { |request| request[:id].to_i }
+    return if @request_numbers.present?
 
-  def xml_hash
-    Xmlhash.parse(request.body.read) || {}
-  end
-
-  def set_staging_project
-    @staging_project = Project.get_by_name(params[:staging_project_name])
-  end
-
-  def set_staging_workflow
-    @staging_workflow = @staging_project.staging_workflow
-    return if @staging_workflow
     render_error(
-      status: 422,
+      status: 400,
       errorcode: 'invalid_request',
-      message: "#{@staging_project} is not a valid staging project, can't assign requests to it."
+      message: 'Error while parsing the numbers of the requests'
     )
   end
 
-  def set_project
-    @project = @staging_workflow.project
+  def set_staging_project
+    @staging_project = @staging_workflow.staging_projects.find_by(name: params[:staging_project_name])
+    return if @staging_project
+    render_error(
+      status: 404,
+      errorcode: 'not_found',
+      message: "Staging Project '#{params[:staging_project_name]}' not found in Staging: '#{@staging_workflow.project}'"
+    )
   end
 
   def check_overall_state

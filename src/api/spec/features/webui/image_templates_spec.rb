@@ -1,6 +1,6 @@
 require 'browser_helper'
 
-RSpec.feature 'ImageTemplates', type: :feature, js: true do
+RSpec.feature 'ImageTemplates', type: :feature, js: true, vcr: true do
   let!(:user) { create(:confirmed_user, :with_home, login: 'tom') }
 
   context 'branching' do
@@ -20,10 +20,8 @@ RSpec.feature 'ImageTemplates', type: :feature, js: true do
     end
 
     scenario 'branch image template' do
-      skip_if_bootstrap
-
       visit image_templates_path
-      expect(page).to have_css('input.create_appliance[disabled]')
+      expect(page).to have_css('input[type=submit][disabled]')
 
       login(user)
       visit root_path
@@ -38,22 +36,21 @@ RSpec.feature 'ImageTemplates', type: :feature, js: true do
       expect(page).to have_selector("input[data-package='#{kiwi_package}']:not(:checked)", visible: false)
 
       expect(page).to have_field('target_package', with: package1)
-      within :xpath, "//input[@data-package='#{package2}']/../dd" do
+      within :xpath, "//input[@data-package='#{package2}']/../label" do
         find('.description').click
       end
       expect(page).to have_field('target_package', with: package2)
       fill_in 'target_package', with: 'custom_name'
 
       click_button('Create appliance')
-      find('#package_tabs')
+      find('body')
       expect(page).to have_text('Successfully branched package')
-      expect(page).to have_text('home:tom:branches:my_project > custom_name')
+      expect(page).to have_text("home:tom:branches:my_project\ncustom_name")
     end
 
     scenario 'branch Kiwi image template' do
-      skip_if_bootstrap
       visit image_templates_path
-      expect(page).to have_css('input.create_appliance[disabled]')
+      expect(page).to have_css('input[type=submit][disabled]')
 
       login(user)
       visit root_path
@@ -68,7 +65,7 @@ RSpec.feature 'ImageTemplates', type: :feature, js: true do
       expect(page).to have_selector("input[data-package='#{kiwi_package}']:not(:checked)", visible: false)
 
       expect(page).to have_field('target_package', with: package1)
-      within :xpath, "//input[@data-package='#{kiwi_package}']/../dd" do
+      within :xpath, "//input[@data-package='#{kiwi_package}']/../label" do
         find('.description').click
       end
       expect(page).to have_field('target_package', with: kiwi_package)
@@ -76,7 +73,7 @@ RSpec.feature 'ImageTemplates', type: :feature, js: true do
       fill_in 'target_package', with: 'package_with_kiwi_image'
 
       click_button('Create appliance')
-      expect(page).to have_text('home:tom:branches:my_project > package_with_kiwi_image')
+      expect(page).to have_text("home:tom:branches:my_project\npackage_with_kiwi_image")
     end
   end
 end

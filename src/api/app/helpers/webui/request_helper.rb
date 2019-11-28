@@ -84,32 +84,6 @@ module Webui::RequestHelper
     end
   end
 
-  def priority_description(prio)
-    case prio
-    when 'low'
-      'Work on this request if nothing else needs to be done.'
-    when 'moderate'
-      'Work on this request.'
-    when 'important'
-      'Finish other requests you have begun, then work on this request.'
-    when 'critical'
-      'Drop everything and work on this request.'
-    end
-  end
-
-  def priority_number(prio)
-    case prio
-    when 'low'
-      '1'
-    when 'moderate'
-      '2'
-    when 'important'
-      '3'
-    when 'critical'
-      '4'
-    end
-  end
-
   def target_project_link(row)
     result = ''
     if row.target_project
@@ -128,11 +102,6 @@ module Webui::RequestHelper
     return "#{file_element['old']['name']} -> #{filename}"
   end
 
-  def reviewer(review)
-    return "#{review[:by_project]} / #{review[:by_package]}" if review[:by_package]
-    review[:by_user] || review[:by_group] || review[:by_project]
-  end
-
   def diff_data(action_type, sourcediff)
     diff = (action_type == :delete ? sourcediff['old'] : sourcediff['new'])
 
@@ -143,17 +112,9 @@ module Webui::RequestHelper
     "#{diff['project']} / #{diff['package']} (rev #{diff['rev']})"
   end
 
-  def hidden_review_payload(review)
-    capture do
-      [:by_user, :by_group, :by_project, :by_package].each do |key|
-        concat(hidden_field_tag(key, review[key])) if review[key]
-      end
-    end
-  end
-
-  # rubocop:disable Style/FormatStringToken, Style/FormatString
+  # rubocop:disable Style/FormatString
   def request_action_header(action, creator)
-    source_project_hash = { project: action[:sprj], package: action[:spkg] }
+    source_project_hash = { project: action[:sprj], package: action[:spkg], trim_to: nil }
 
     case action[:type]
     when :submit
@@ -193,7 +154,7 @@ module Webui::RequestHelper
       }
     end.html_safe
   end
-  # rubocop:enable Style/FormatStringToken, Style/FormatString
+  # rubocop:enable Style/FormatString
 
   def list_maintainers(maintainers)
     maintainers.pluck(:login).map do |maintainer|

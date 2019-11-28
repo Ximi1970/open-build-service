@@ -91,6 +91,7 @@ RSpec.describe Webui::PackageController, vcr: true do
       end
 
       it { expect(flash[:success]).to match(" Superseding failed: Couldn't find request with id '42'") }
+
       it_should_behave_like 'a response of a successful submit request'
     end
 
@@ -143,6 +144,7 @@ RSpec.describe Webui::PackageController, vcr: true do
         expect(flash[:error]).to eq('Unable to submit: Validation failed: Bs request actions is invalid, ' \
                                     'Bs request actions Sourceupdate is not included in the list')
       end
+
       it { expect(response).to redirect_to(package_show_path(project: source_project, package: package)) }
       it { expect(BsRequestActionSubmit.where(target_project: target_project.name, target_package: package.name)).not_to exist }
     end
@@ -207,7 +209,7 @@ RSpec.describe Webui::PackageController, vcr: true do
       end
 
       it { expect(controller).to set_flash[:error] }
-      it { expect(response).to redirect_to(package_edit_path(project: source_project, package: source_package)) }
+      it { expect(response).to redirect_to(package_show_path(project: source_project, package: source_package)) }
     end
   end
 
@@ -219,6 +221,7 @@ RSpec.describe Webui::PackageController, vcr: true do
     it 'sends the xml representation of a package' do
       expect(assigns(:meta)).to eq(source_package.render_xml)
     end
+
     it { expect(response).to render_template('package/meta') }
     it { expect(response).to have_http_status(:success) }
   end
@@ -270,6 +273,7 @@ RSpec.describe Webui::PackageController, vcr: true do
       end
 
       it { expect(flash[:success]).to eq('Successfully branched package') }
+
       it 'redirects to the branched package' do
         expect(response).to redirect_to(package_show_path(project: "#{source_project.name}:branches:#{source_project.name}",
                                                           package: 'new_package_name'))
@@ -294,10 +298,12 @@ RSpec.describe Webui::PackageController, vcr: true do
       end
 
       it { expect(flash[:success]).to eq('Successfully branched package') }
+
       it 'redirects to the branched package' do
         expect(response).to redirect_to(package_show_path(project: "#{source_project.name}:branches:#{source_project.name}",
                                                           package: source_package.name))
       end
+
       it { expect(branched_package.linkinfo['rev']).to eq(set_revision) }
     end
   end
@@ -333,6 +339,7 @@ RSpec.describe Webui::PackageController, vcr: true do
 
       it { expect(response).to have_http_status(:found) }
       it { expect(flash[:success]).to eq('Package was successfully removed.') }
+
       it 'deletes the package' do
         expect(user.home_project.packages).to be_empty
       end
@@ -360,91 +367,6 @@ RSpec.describe Webui::PackageController, vcr: true do
         it 'deletes the package' do
           expect(flash[:success]).to eq('Package was successfully removed.')
           expect(user.home_project.packages).to be_empty
-        end
-      end
-    end
-  end
-
-  describe 'GET #binaries' do
-    before do
-      login user
-    end
-
-    after do
-      Package.destroy_all
-      Repository.destroy_all
-    end
-
-    context 'with a failure in the backend' do
-      before do
-        allow(Backend::Api::BuildResults::Status).to receive(:result_swiss_knife).and_raise(Backend::Error, 'fake message')
-        get :binaries, params: { package: source_package, project: source_project, repository: repo_for_source_project.name }
-      end
-
-      it { expect(flash[:error]).to eq('fake message') }
-      it { expect(response).to redirect_to(package_show_path(project: source_project, package: source_package)) }
-    end
-
-    context 'without build results' do
-      before do
-        allow(Backend::Api::BuildResults::Status).to receive(:result_swiss_knife).and_raise(Backend::NotFoundError)
-      end
-
-      let(:get_binaries) { get :binaries, params: { package: source_package, project: source_project, repository: repo_for_source_project.name } }
-
-      it { expect { get_binaries }.to raise_error(ActiveRecord::RecordNotFound) }
-    end
-
-    context 'with build results and no binaries' do
-      render_views
-
-      before do
-        allow(Backend::Api::BuildResults::Status).to receive(:result_swiss_knife).and_return(fake_build_results_without_binaries)
-        get :binaries, params: { package: source_package, project: source_project, repository: repo_for_source_project.name }
-      end
-
-      it { expect(response).to have_http_status(:success) }
-      it { expect(response.body).to match(/No built binaries/) }
-    end
-
-    context 'with build results and binaries' do
-      render_views
-
-      before do
-        allow(Backend::Api::BuildResults::Status).to receive(:result_swiss_knife).and_return(fake_build_results)
-        allow_any_instance_of(Webui::PackageController).to receive(:download_url_for_file_in_repo).and_return('http://fake.com')
-        get :binaries, params: { package: source_package, project: source_project, repository: repo_for_source_project.name }
-      end
-
-      it { expect(response).to have_http_status(:success) }
-
-      it "excludes the '_statistics' files from the binaries page" do
-        assert_select 'li.binaries_list_item', text: /_statistics/, count: 0
-      end
-
-      it "lists all binaries returned as build result with a 'Download' link" do
-        assert_select 'li.binaries_list_item', count: 4 do
-          assert_select 'a', text: 'Download', count: 4
-          assert_select 'a', text: 'Details', count: 3
-        end
-      end
-
-      it 'does not show the details link for the rpmlint.log' do
-        assert_select 'li.binaries_list_item', text: /rpmlint.log/ do
-          assert_select 'a', text: 'Details', count: 0
-        end
-      end
-
-      it "shows the name of each binary together with it's size" do
-        assert_select 'li.binaries_list_item', text: /image_binary.vhdfixed.xz \(118 MB\)/
-        assert_select 'li.binaries_list_item', text: /image_binary.xz.sha256 \(1.5 KB\)/
-        assert_select 'li.binaries_list_item', text: /updateinfo.xml \(4.13 KB\)/
-        assert_select 'li.binaries_list_item', text: /rpmlint.log \(121 Bytes\)/
-      end
-
-      it 'shows a cloud upload link for binaries that can be uploaded to the cloud' do
-        assert_select 'li.binaries_list_item', text: /image_binary.vhdfixed.xz/ do
-          assert_select 'a', text: 'Cloud Upload', count: 1
         end
       end
     end
@@ -495,6 +417,7 @@ RSpec.describe Webui::PackageController, vcr: true do
 
         it { expect(response).to have_http_status(expected_success_status) }
         it { expect(flash[:success]).to eq("The file '学习总结' has been successfully saved.") }
+
         it 'creates the file' do
           expect { source_package.source_file('学习总结') }.not_to raise_error
           expect(URI.encode(source_package.source_file('学习总结'))).to eq(URI.encode(file_to_upload))
@@ -514,6 +437,7 @@ RSpec.describe Webui::PackageController, vcr: true do
 
         it { expect(response).to have_http_status(expected_success_status) }
         it { expect(flash[:success]).to eq("The file 'remote_file' has been successfully saved.") }
+
         # Uploading a remote file creates a service instead of downloading it directly!
         it 'creates a valid service file' do
           expect { source_package.source_file('_service') }.not_to raise_error
@@ -898,6 +822,7 @@ RSpec.describe Webui::PackageController, vcr: true do
         expect(flash[:error]).to match(/Error while saving the Meta file: package validation error.*FATAL:/)
         expect(flash[:error]).to match(/Opening and ending tag mismatch: package line 1 and paaaaackage\./)
       end
+
       it { expect(response).to have_http_status(:bad_request) }
     end
 
@@ -963,12 +888,14 @@ RSpec.describe Webui::PackageController, vcr: true do
 
       context 'full diff requested' do
         it 'does not show a hint' do
+          login user
           get :rdiff, params: { project: source_project, package: package_ascii_file, full_diff: true, rev: 2 }
           expect(assigns(:not_full_diff)).to be_falsy
         end
 
         context 'for ASCII files' do
           before do
+            login user
             get :rdiff, params: { project: source_project, package: package_ascii_file, full_diff: true, rev: 2 }
           end
 
@@ -980,6 +907,7 @@ RSpec.describe Webui::PackageController, vcr: true do
 
         context 'for archives' do
           before do
+            login user
             get :rdiff, params: { project: source_project, package: package_binary_file, full_diff: true }
           end
 
@@ -1267,40 +1195,6 @@ RSpec.describe Webui::PackageController, vcr: true do
     end
   end
 
-  describe 'POST #wipe_binaries' do
-    before do
-      login(user)
-    end
-
-    context 'when wiping binaries fails' do
-      before do
-        post :wipe_binaries, params: { project: source_project, package: source_package, repository: 'non_existant_repository' }
-      end
-
-      it 'lets the user know there was an error' do
-        expect(flash[:error]).to match('Error while triggering wipe binaries for home:tom/my_package')
-        expect(flash[:error]).to match('no repository defined')
-      end
-      it 'redirects to package binaries' do
-        expect(response).to redirect_to(package_binaries_path(project: source_project, package: source_package,
-                                                              repository: 'non_existant_repository'))
-      end
-    end
-
-    context 'when wiping binaries succeeds' do
-      let!(:repository) { create(:repository, name: 'my_repository', project: source_project, architectures: ['i586']) }
-
-      before do
-        source_project.store
-
-        post :wipe_binaries, params: { project: source_project, package: source_package, repository: repository.name }
-      end
-
-      it { expect(flash[:success]).to eq("Triggered wipe binaries for #{source_project.name}/#{source_package.name} successfully.") }
-      it { expect(response).to redirect_to(package_binaries_path(project: source_project, package: source_package, repository: repository.name)) }
-    end
-  end
-
   describe 'POST #abort_build' do
     before do
       login(user)
@@ -1315,6 +1209,7 @@ RSpec.describe Webui::PackageController, vcr: true do
         expect(flash[:error]).to match('Error while triggering abort build for home:tom/my_package')
         expect(flash[:error]).to match('no repository defined')
       end
+
       it {
         expect(response).to redirect_to(package_live_build_log_path(project: source_project,
                                                                     package: source_package,
@@ -1335,6 +1230,7 @@ RSpec.describe Webui::PackageController, vcr: true do
     end
   end
 
+  # FIXME: This should be feature specs
   describe 'GET #statistics' do
     let!(:repository) { create(:repository, name: 'statistics', project: source_project, architectures: ['i586']) }
 
@@ -1350,32 +1246,32 @@ RSpec.describe Webui::PackageController, vcr: true do
 
       before do
         allow(Backend::Api::BuildResults::Status).to receive(:statistics).
-          with(source_project, source_package.name, repository.name, 'i586').
+          with(source_project.name, source_package.name, repository.name, 'i586').
           and_return('<buildstatistics><disk><usage><size unit="M">30</size></usage></disk></buildstatistics>')
 
-        get :statistics, params: { project: source_project, package: source_package, arch: 'i586', repository: repository.name }
+        get :statistics, params: { project: source_project.name, package: source_package.name, arch: 'i586', repository: repository.name }
       end
 
-      it { expect(assigns(:statistics)).to eq('disk' => { 'usage' => { 'size' => { '_content' => '30', 'unit' => 'M' } } }) }
+      it { expect(assigns(:statistics).disk).to have_attributes(size: '30', unit: 'M', io_requests: nil, io_sectors: nil) }
       it { expect(response).to have_http_status(:success) }
     end
 
     context 'when backend does not return statistics' do
-      let(:get_statistics) { get :statistics, params: { project: source_project, package: source_package, arch: 'i586', repository: repository.name } }
+      let(:get_statistics) { get :statistics, params: { project: source_project.name, package: source_package.name, arch: 'i586', repository: repository.name } }
 
-      it { expect { get_statistics }.to raise_error(ActiveRecord::RecordNotFound) }
+      it { expect(assigns(:statistics)).to be_nil }
     end
 
     context 'when backend raises an exception' do
       before do
         allow(Backend::Api::BuildResults::Status).to receive(:statistics).
-          with(source_project, source_package.name, repository.name, 'i586').
+          with(source_project.name, source_package.name, repository.name, 'i586').
           and_raise(Backend::NotFoundError)
       end
 
-      let(:get_statistics) { get :statistics, params: { project: source_project, package: source_package, arch: 'i586', repository: repository.name } }
+      let(:get_statistics) { get :statistics, params: { project: source_project.name, package: source_package.name, arch: 'i586', repository: repository.name } }
 
-      it { expect { get_statistics }.to raise_error(ActiveRecord::RecordNotFound) }
+      it { expect(assigns(:statistics)).to be_nil }
     end
   end
 
@@ -1408,208 +1304,6 @@ RSpec.describe Webui::PackageController, vcr: true do
     it { expect(assigns(:repo_list)).not_to include(['openSUSE_Tumbleweed', 'openSUSE_Tumbleweed']) }
     it { expect(assigns(:repo_arch_hash)['openSUSE_Leap_42_1']).to include('x86_64') }
     it { expect(assigns(:repo_arch_hash)['openSUSE_Leap_42_1']).not_to include('armv7l') }
-  end
-
-  describe 'GET #submit_request_dialog' do
-    let(:package) { create(:package_with_changes_file, project: source_project, name: 'package_with_changes_file') }
-
-    before do
-      login(user)
-      get :submit_request_dialog,
-          xhr: true,
-          params: { project: source_project, package: package, targetpackage: source_package, targetproject: source_project }
-    end
-
-    it { expect(assigns(:package)).to eq(package) }
-    it { expect(assigns(:project)).to eq(source_project) }
-    it { expect(assigns(:tpkg)).to eq(source_package.name) }
-    it { expect(assigns(:tprj)).to eq(source_project.name) }
-    it { expect(assigns(:description)).to eq("- Testing the submit diff\n- Temporary hack\n") }
-  end
-
-  describe 'GET #binary' do
-    let(:architecture) { 'x86_64' }
-    let(:package_binaries_page) { package_binaries_path(package: source_package, project: source_project, repository: repo_for_source_project.name) }
-    let(:fake_fileinfo) { { sumary: 'fileinfo', description: 'fake' } }
-
-    before do
-      login(user)
-    end
-
-    context 'with a failure in the backend' do
-      before do
-        allow(Backend::Api::BuildResults::Binaries).to receive(:fileinfo_ext).and_raise(Backend::Error, 'fake message')
-      end
-
-      subject do
-        get :binary, params: { package: source_package,
-                               project: source_project,
-                               repository: repo_for_source_project.name,
-                               arch: 'x86_64',
-                               filename: 'filename.txt' }
-      end
-
-      it { expect(response).to have_http_status(:success) }
-      it 'shows an error message' do
-        subject
-        expect(flash[:error]).to eq('There has been an internal error. Please try again.')
-      end
-    end
-
-    context 'without file info' do
-      before do
-        allow(Backend::Api::BuildResults::Binaries).to receive(:fileinfo_ext).and_return(nil)
-      end
-
-      subject do
-        get :binary, params: { package: source_package,
-                               project: source_project,
-                               repository: repo_for_source_project.name,
-                               arch: 'x86_64',
-                               filename: 'filename.txt' }
-      end
-
-      it { expect { subject }.to raise_error(ActiveRecord::RecordNotFound) }
-    end
-
-    context 'without a valid architecture' do
-      before do
-        get :binary, params: { package: source_package, project: source_project, repository: repo_for_source_project.name, arch: 'fake_arch', filename: 'filename.txt' }
-      end
-
-      it { expect(flash[:error]).to eq("Couldn't find architecture 'fake_arch'") }
-      it { is_expected.to redirect_to(package_binaries_page) }
-    end
-
-    context 'with a valid download url' do
-      before do
-        allow(Backend::Api::BuildResults::Binaries).to receive(:fileinfo_ext).and_return(fake_fileinfo)
-        allow_any_instance_of(::PackageControllerService::URLGenerator).to receive(:download_url_for_file_in_repo).and_return('http://fake.com/filename.txt')
-      end
-
-      context 'and normal html request' do
-        before do
-          get :binary, params: { package: source_package, project: source_project, repository: repo_for_source_project.name, arch: 'x86_64', filename: 'filename.txt', format: :html }
-        end
-
-        it { expect(response).to have_http_status(:success) }
-      end
-
-      context 'and a non html request' do
-        before do
-          get :binary, params: { package: source_package, project: source_project, repository: repo_for_source_project.name, arch: 'x86_64', filename: 'filename.txt' }
-        end
-
-        it { expect(response).to have_http_status(:redirect) }
-        it { is_expected.to redirect_to('http://fake.com/filename.txt') }
-      end
-    end
-  end
-
-  describe 'GET #dependency' do
-    before do
-      allow(Backend::Api::BuildResults::Binaries).to receive(:fileinfo_ext).and_return(fileinfo)
-
-      get :dependency, params: { project: source_project, package: source_package }.merge(params)
-    end
-
-    let(:fileinfo) { { summary: 'fileinfo', description: 'fake' } }
-
-    context 'when passing params referring to an invalid project' do
-      let(:params) { { dependant_project: 'project' } }
-
-      it { expect(flash[:error]).to eq("Project '#{params[:dependant_project]}' is invalid.") }
-      it { expect(response).to have_http_status(:redirect) }
-    end
-
-    context 'when passing params referring to a valid project and an invalid architecture' do
-      let(:params) { { dependant_project: source_project.name, arch: '123' } }
-
-      it { expect(flash[:error]).to eq("Architecture '#{params[:arch]}' is invalid.") }
-      it { expect(response).to have_http_status(:redirect) }
-    end
-
-    context 'when passing params referring to valid project/architecture and an invalid repository' do
-      let(:params) { { dependant_project: source_project.name, arch: 'i586', repository: 'something' } }
-
-      it { expect(flash[:error]).to eq("Repository '#{params[:repository]}' is invalid.") }
-      it { expect(response).to have_http_status(:redirect) }
-    end
-
-    context 'when passing params referring to valid project/architecture/repository and an invalid repository' do
-      let(:params) do
-        {
-          dependant_project: source_project.name,
-          arch: 'i586',
-          repository: repo_for_source_project.name,
-          dependant_repository: 'something'
-        }
-      end
-
-      it { expect(flash[:error]).to eq("Repository '#{params[:dependant_repository]}' is invalid.") }
-      it { expect(response).to have_http_status(:redirect) }
-    end
-
-    context 'when passing params referring to valid project/architecture/repositories and a filename' do
-      let(:another_repo_for_source_project) do
-        create(:repository, project: source_project, architectures: ['i586'], name: 'source_repo_2').tap { |_| source_project.store }
-      end
-
-      let(:params) do
-        {
-          dependant_project: source_project.name,
-          arch: 'i586',
-          repository: repo_for_source_project.name,
-          dependant_repository: another_repo_for_source_project.name,
-          filename: 'test.rpm'
-        }
-      end
-
-      it { expect(assigns(:arch)).to eq(params[:arch]) }
-      it { expect(assigns(:repository)).to eq(params[:repository]) }
-      it { expect(assigns(:dependant_repository)).to eq(params[:dependant_repository]) }
-      it { expect(assigns(:dependant_project)).to eq(params[:dependant_project]) }
-      it { expect(assigns(:filename)).to eq(params[:filename]) }
-      it { expect(response).to have_http_status(:success) }
-
-      context 'and fileinfo is nil' do
-        let(:fileinfo) { nil }
-
-        it { expect(response).to have_http_status(:redirect) }
-      end
-    end
-  end
-
-  describe 'GET #binary_download' do
-    before do
-      login(user)
-    end
-
-    context 'when the backend has a build result' do
-      subject do
-        get :binary_download, params: { package: source_package, project: source_project, repository: repo_for_source_project.name, arch: 'i586', filename: 'my_file' }
-      end
-
-      it { is_expected.to redirect_to('http://localhost:3203/build/home:tom/source_repo/i586/my_package/my_file') }
-    end
-
-    context 'when requesting a result for an invalid repository' do
-      subject! do
-        get :binary_download, params: { package: source_package, project: source_project, repository: 'invalid', arch: 'i586', filename: 'my_file' }
-      end
-
-      it { is_expected.to redirect_to(package_show_path(project: source_project, package: source_package)) }
-      it { expect(flash[:error]).to eq("Couldn't find repository 'invalid'") }
-    end
-
-    context 'when requesting a result for an invalid architecture' do
-      subject! do
-        get :binary_download, params: { package: source_package, project: source_project, repository: repo_for_source_project.name, arch: 'invalid', filename: 'my_file' }
-      end
-
-      it { is_expected.to redirect_to(package_binaries_path(project: source_project, package: source_package, repository: repo_for_source_project.name)) }
-      it { expect(flash[:error]).to eq("Couldn't find architecture 'invalid'") }
-    end
   end
 
   describe 'GET #rpmlint_log' do

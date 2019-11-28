@@ -54,6 +54,7 @@ use BSVerify;
 use BSStdRunner;
 use BSUrlmapper;
 use BSPGP;
+use BSHTTP;
 use BSRepServer::Containerinfo;
 use BSPublisher::Container;
 use BSPublisher::Util;
@@ -81,6 +82,8 @@ my @binsufs = qw{rpm udeb ddeb deb pkg.tar.gz pkg.tar.xz};
 my $binsufsre = join('|', map {"\Q$_\E"} @binsufs);
 my @binsufsrsync = map {"--include=*.$_"} @binsufs;
 my $binarchs = join("|", keys(%BSCando::knownarch));
+
+my $trackercacheversion = 2;
 
 my $testmode;
 
@@ -568,6 +571,7 @@ sub createrepo_rpmmd {
   qsystem('rm', '-rf', "$extrep/repodata/repoview") if -d "$extrep/repodata/repoview";
   qsystem('rm', '-rf', "$extrep/repodata/.olddata") if -d "$extrep/repodata/.olddata";
   qsystem('rm', '-f', "$extrep/repodata/patterns*");
+  qsystem('rm', '-rf', "$extrep/.repodata") if -d "$extrep/.repodata";
 
   # run createrepo
   unlink("$extrep/.chksums");
@@ -584,12 +588,15 @@ sub createrepo_rpmmd {
       $ENV{'CREATEREPO_CHECKSUMS'} = "$extrep/.chksums";
     }
   }
+  my $repoinfo = $data->{'repoinfo'};
   # create generic rpm-md meta data
   # --update requires a newer createrepo version, tested with version 0.4.10
   my @createrepoargs;
   push @createrepoargs, '--changelog-limit', '20';
   push @createrepoargs, map { ('--repo', $_ ) } @repotags;
   push @createrepoargs, '--content', 'debug' if $data->{'dbgsplit'};
+  push @createrepoargs, '--content', 'update' if ($repoinfo->{'projectkind'} || '') eq 'maintenance_incident';
+  push @createrepoargs, '--content', 'update' if ($repoinfo->{'projectkind'} || '') eq 'maintenance_release';
   my @legacyargs;
   if ($options{'legacy'}) {
     push @legacyargs, '--simple-md-filenames', '--checksum=sha';
@@ -600,7 +607,6 @@ sub createrepo_rpmmd {
   if ($options{'zchunk'}) {
     # we currently do not support user generated zchunk dictionaries for
     # security reasons.
-    my $repoinfo = $data->{'repoinfo'};
     for my $sprp (@{$repoinfo->{'prpsearchpath'} || []}) {
       my $zchunk_dict_dir = "$BSConfig::bsdir/zchunk/$sprp->{'project'}";
       next unless -d $zchunk_dict_dir;
@@ -759,6 +765,7 @@ sub deleterepo_rpmmd {
   my ($extrep, $projid) = @_;
 
   qsystem('rm', '-rf', "$extrep/repodata") if -d "$extrep/repodata";
+  qsystem('rm', '-rf', "$extrep/.repodata") if -d "$extrep/.repodata";
   unlink("$extrep/$projid.repo");
 }
 
@@ -1054,12 +1061,13 @@ sub createrepo_staticlinks {
   for my $arch ('.', ls($extrep)) {
     next unless -d "$extrep/$arch";
     for (ls("$extrep/$arch")) {
-      unlink "$extrep/$arch/$_" if -l "$extrep/$arch/$_" && ! -e "$extrep/$arch/$_";
+      if (-l "$extrep/$arch/$_") {
+        unlink "$extrep/$arch/$_" unless -e "$extrep/$arch/$_";
+        next;
+      }
       my $link;
-      if (/^(.*)-Build(?:\d\d\d\d|\d+\.\d+)(-Media\d?(\.license)?)$/s) {
+      if (/^(.*)-Build(?:\d\d\d\d+|\d+\.\d+)(-Media\d?(\.license)?)$/s) {
         $link = "$1$2"; # no support for versioned links
-      } else {
-        next unless -f "$extrep/$arch/$_";
       }
       if (/^(.*)-([^-]*)-[^-]*\.rpm$/s) {
         $link = "$1.rpm";
@@ -1073,7 +1081,7 @@ sub createrepo_staticlinks {
       } elsif (/^(.*)_([^_]*)_([^_]*)-Build[^_]*\.snap$/s) {
         $link = "${1}_${3}.snap";
         $link = "${1}_${3}_$2.snap" if $versioned;
-      } elsif (/^(.*)-Build(?:\d\d\d\d|\d+\.\d+)(-Media\d?)(\.iso?(\.sha256)?)$/s) {
+      } elsif (/^(.*)-Build(?:\d\d\d\d+|\d+\.\d+)(-Media\d?)(\.iso?(\.sha256)?)$/s) {
         # product builds
         $link = "$1$2$3"; # no support for versioned links
       } elsif (/^(.*\.(?:$binarchs)?)-([^-]+)?(-.*?)?-([^-]+)(\.(raw\.install\.raw\.xz|raw\.xz|tar\.xz|box|json|install\.iso|tbz|tgz|vmx|vmdk|vmdk\.xz|vhdx|vhdx\.xz|vdi|vdi\.xz|vhdfixed\.xz|iso|phar|qcow2|qcow2\.xz|ova|ova\.xz|cpio\.tar\.bz2)?(?:\.sha256)?)$/s) {
@@ -1085,7 +1093,7 @@ sub createrepo_staticlinks {
       next unless $link;
       unlink("$extrep/$arch/.$link"); # drop left over
       symlink($_, "$extrep/$arch/.$link");
-      rename("$extrep/$arch/.$link", "$extrep/$arch/$link"); # atomar update
+      rename("$extrep/$arch/.$link", "$extrep/$arch/$link"); # atomic update
     }
   }
 }
@@ -1124,9 +1132,9 @@ sub createrepo_vagrant {
     if (!$withversion) {
       # split off profile
       my $profile = '';
-      $profile = $1 if $xbox =~ s/(-[^0-9-][^-]*)$//;
+      $profile = $1 if $xbox =~ s/((?:-[^0-9-][^-]*)+)$//;
       # split off version
-      next unless $xbox =~ s/-([^-]*)$//;
+      next unless $xbox =~ s/-([0-9][^-]*)$//;
       my $version = $1;
       $profile = '' if $profile eq "-$provider";
       # add to boxes (last one wins)
@@ -1338,6 +1346,13 @@ sub createpatterns_ymp {
     %nprojpack = map {$_->{'name'} => $_} @{$nprojpack->{'project'} || []};
   }
 
+  # get ymp distversion list from config
+  my @ympdist;
+  for (@{$data->{'config'}->{'publishflags'} || []}) {
+    push @ympdist, BSHTTP::urldecode($1) if /^ympdist:(.*)$/s;
+  }
+  @ympdist = BSUtil::unify(@ympdist) if @ympdist;
+
   for my $pattern (@$patterns) {
     my $ympname = $pattern->{'name'};
     $ympname =~ s/\.xml$//;
@@ -1393,7 +1408,8 @@ sub createpatterns_ymp {
       fillpkgdescription($software[-1], $extrep, $repoinfo, $entry->{'name'});
     }
     $group->{'software'} = { 'item' => \@software };
-    $ymp->{'group'} = [ $group ];
+    push @{$ymp->{'group'}}, { %$group, 'distversion' => $_ } for @ympdist;
+    $ymp->{'group'} ||= [ $group ];
 
     writexml("$extrep/.$ympname", "$extrep/$ympname", $ymp, $BSXML::ymp);
 
@@ -1460,8 +1476,8 @@ sub sync_to_stage {
   my $extdirx = $extdir;
   $extdirx =~ s/\/[^\/]*$// if $isdelete;
 
-  my $rsync_extra_options;
-  $rsync_extra_options = $BSConfig::rsync_extra_options if $BSConfig::rsync_extra_options;
+  my @rsync_extra_options;
+  @rsync_extra_options = split(' ', $BSConfig::rsync_extra_options) if $BSConfig::rsync_extra_options;
 
   for my $stageserver (@stageservers) {
     if ($stageserver =~ /^rsync:\/\//) {
@@ -1469,8 +1485,8 @@ sub sync_to_stage {
       print "    running rsync to $stageserver at ".localtime(time)."\n";
       # rsync with a timeout of 1 hour
       # sync first just the binaries without deletion of the old ones, afterwards the rest(esp. meta data) and cleanup
-      qsystem('echo', "$extdirx\0", 'rsync', '-ar0', $rsync_extra_options, '--fuzzy', @binsufsrsync, '--include=*/', '--exclude=*', '--timeout', '7200', '--files-from=-', $syncroot, $stageserver) && die("    rsync failed at ".localtime(time).": $?\n");
-      qsystem('echo', "$extdirx\0", 'rsync', '-ar0', $rsync_extra_options, '--delete-after', '--exclude=repocache', '--delete-excluded', '--timeout', '7200', '--files-from=-', $syncroot, $stageserver) && die("    rsync failed at ".localtime(time).": $?\n");
+      qsystem('echo', "$extdirx\0", 'rsync', '-ar0', @rsync_extra_options, '--fuzzy', @binsufsrsync, '--include=*/', '--exclude=*', '--timeout', '7200', '--files-from=-', $syncroot, $stageserver) && die("    rsync failed at ".localtime(time).": $?\n");
+      qsystem('echo', "$extdirx\0", 'rsync', '-ar0', @rsync_extra_options, '--delete-after', '--exclude=repocache', '--delete-excluded', '--timeout', '7200', '--files-from=-', $syncroot, $stageserver) && die("    rsync failed at ".localtime(time).": $?\n");
     }
     if ($stageserver =~ /^script:(\/.*)$/) {
       print "    running sync script $1 at ".localtime(time)."\n";
@@ -1491,7 +1507,7 @@ sub sync_to_stage {
   if ($BSConfig::stageserver_sync && $BSConfig::stageserver_sync =~ /^rsync:\/\//) {
     print "    running trigger rsync to $BSConfig::stageserver_sync at ".localtime(time)."\n";
     # small sync, timout 1 minute
-    qsystem('rsync', '-a', $rsync_extra_options, '--timeout', '120', "$extrepodir_sync/$filename", $BSConfig::stageserver_sync."/".$filename) && warn("    trigger rsync failed at ".localtime(time).": $?\n");
+    qsystem('rsync', '-a', @rsync_extra_options, '--timeout', '120', "$extrepodir_sync/$filename", $BSConfig::stageserver_sync."/".$filename) && warn("    trigger rsync failed at ".localtime(time).": $?\n");
   }
 }
 
@@ -1851,6 +1867,8 @@ sub publish {
       } elsif ($bin =~ /^.+_[^_]+_([^_\.]+)\.[ud]?deb$/) {
 	$p = "$1/$bin";
       } elsif ($bin =~ /\.(?:AppImage|AppImage.zsync|snap|exe)?$/) {
+	$p = "$bin";
+      } elsif ($bin =~ /\.appx$/) {
 	$p = "$bin";
       } elsif ($bin =~ /\.d?rpm$/) {
 	# legacy format
@@ -2314,7 +2332,7 @@ sub publish {
   my $packtrackcache;
   if (-s "$reporoot/$prp/:repoinfo") {
     $oldrepoinfo = BSUtil::retrieve("$reporoot/$prp/:repoinfo");
-    $packtrackcache = $oldrepoinfo->{'trackercache'} if $oldrepoinfo->{'trackercache'} && ($oldrepoinfo->{'trackercacheversion'} || '') eq '1';
+    $packtrackcache = $oldrepoinfo->{'trackercache'} if $oldrepoinfo->{'trackercache'} && ($oldrepoinfo->{'trackercacheversion'} || '') eq $trackercacheversion;
     $publishid = $oldrepoinfo->{'publishid'} + 1 if $oldrepoinfo->{'publishid'};
   }
   $publishid ||= $starttime;
@@ -2376,7 +2394,7 @@ sub publish {
 	next unless @s;
 	my $c = $cache{"$bin/$s[9]/$s[7]/$s[1]"};
 	if ($c) {
-	  my @d = qw{arch name epoch version release disturl buildtime provides};
+	  my @d = qw{arch name epoch version release disturl buildtime cpeid};
 	  $res = {};
 	  for (@$c) {
 	    my $dd = shift @d;
@@ -2387,6 +2405,12 @@ sub publish {
             $res = Build::query("$extrep/$bin", 'evra' => 1, 'buildtime' => 1, 'disturl' => 1);
 	  };
 	  next unless $res;
+          # catch provided product cpeid strings
+	  my ($cpeid) = grep {/^product-cpeid\(\)/} @{$res->{'provides'} || []};
+	  if ($cpeid) {
+	    $cpeid =~ s/.* = //;
+	    $res->{'cpeid'} = BSHTTP::urldecode($cpeid);
+	  }
 	}
 	my $pt = { 'project' => $projid, 'repository' => $repoid };
 	$pt->{'arch'} = $1 if $bins{$bin} =~ /^\Q$reporoot\E\/\Q$prp\E\/([^\/]+)\//;
@@ -2397,11 +2421,7 @@ sub publish {
 	$pt->{'binaryarch'} = $res->{'arch'} if defined $res->{'arch'};
 	$pt->{'binaryid'} = $res->{'hdrmd5'} if defined $res->{'hdrmd5'};
 	$pt->{'id'} = "$bin/$s[9]/$s[7]/$s[1]";
-        # catch provided product cpeid strings
-        if (my ($cpeid) = grep {$_ =~ m/^product-cpeid\(\)/} @{$res->{"provides"}}) {
-          $cpeid =~ s/.* = //;
-          $pt->{'cpeid'} = BSHTTP::urldecode($cpeid);
-        }
+	$pt->{'cpeid'} = $res->{'cpeid'} if $res->{'cpeid'};
 	$packtrack->{$bin} = $pt;
 	if ($pt->{'arch'}) {
 	  $reportfile = $bin;
@@ -2641,6 +2661,7 @@ sub publish {
     'packtrack' => $packtrack,
     'repotags' => \@repotags,
     'chksumfiles' => \@chksumfiles,
+    'config' => $config,
   };
 
   if ($repotype{'rpm-md'}) {
@@ -2772,12 +2793,12 @@ publishprog_done:
     my @newcache;
     for my $pt (values %$packtrack) {
       my $id = delete $pt->{'id'};
-      push @newcache, $id, [ map {$pt->{$_ eq 'arch' ? 'binaryarch' : $_}} qw{arch name epoch version release disturl buildtime} ] if $id;
+      push @newcache, $id, [ map {$pt->{$_ eq 'arch' ? 'binaryarch' : $_}} qw{arch name epoch version release disturl buildtime cpeid} ] if $id;
     }
     $repoinfo = BSUtil::retrieve("$reporoot/$prp/:repoinfo", 1) || {};
     if (%$repoinfo) {
       $repoinfo->{'trackercache'} = \@newcache;
-      $repoinfo->{'trackercacheversion'} = '1';
+      $repoinfo->{'trackercacheversion'} = $trackercacheversion;
       BSUtil::store("$reporoot/$prp/.:repoinfo", "$reporoot/$prp/:repoinfo", $repoinfo);
       @newcache = ();	# free mem
       undef $repoinfo;	# free mem
@@ -2860,7 +2881,11 @@ sub set_publish_retry {
   my ($req, $due) = @_;
   $publish_retry{$req->{'event'}} = $due;
   my $ev = $req->{'ev'};
-  writepublishtimeevent($ev->{'project'}, $ev->{'repository'}, 0, $due, $req->{'event'}) if $req->{'forked'};
+  if ($req->{'forked'}) {
+    writepublishtimeevent($ev->{'project'}, $ev->{'repository'}, 0, $due, $req->{'event'});
+  } else {
+    BSUtil::ping("$myeventdir/.ping");	# see BSStdRunnder::setdue
+  }
 }
 
 sub notify_state {

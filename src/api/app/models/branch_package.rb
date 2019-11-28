@@ -1,17 +1,7 @@
 class BranchPackage
-  class InvalidArgument < APIError; end
-  class InvalidFilelistError < APIError; end
-  class DoubleBranchPackageError < APIError
-    attr_reader :project, :package
-
-    def initialize(project, package)
-      super(message)
-      @project = project
-      @package = package
-    end
-  end
-
   attr_accessor :params
+
+  include BranchPackage::Errors
 
   # generic branch function for package based, project wide or request based branch
   def initialize(params)
@@ -510,71 +500,19 @@ class BranchPackage
 
   def lookup_incident_pkg(p)
     return unless p[:package].is_a?(Package)
-    @obs_maintenanceproject ||= AttribType.find_by_namespace_and_name!('OBS', 'MaintenanceProject')
-    @maintenance_projects ||= Project.find_by_attribute_type(@obs_maintenanceproject)
-    incident_pkg = nil
-    p[:link_target_project].maintenance_projects.each do |mp|
-      # no defined devel area or no package inside, but we branch from a release are: check in open incidents
-
-      # only approved maintenance projects
-      next unless @maintenance_projects.include?(mp.maintenance_project)
-
-      answer = Backend::Api::Search.incident_packages(p[:link_target_project].name, p[:package].name, mp.maintenance_project.name)
-      data = REXML::Document.new(answer)
-      data.elements.each('collection/package') do |e|
-        ipkg = Package.find_by_project_and_name(e.attributes['project'], e.attributes['name'])
-        if ipkg.nil?
-          logger.error 'read permission or data inconsistency, backend delivered package ' \
-                       "as linked package where no database object exists: #{e.attributes['project']} / #{e.attributes['name']}"
-        elsif ipkg.project.is_maintenance_incident? && ipkg.project.is_unreleased? # is incident ?
-          # is a newer incident ?
-          if incident_pkg.nil? || ipkg.project.name.gsub(/.*:/, '').to_i > incident_pkg.project.name.gsub(/.*:/, '').to_i
-            incident_pkg = ipkg
-          end
-        end
-      end
-    end
-    # newest incident pkg or nil
-    incident_pkg
+    return if p[:link_target_project].maintenance_projects.empty?
+    BranchPackage::LookupIncidentPackage.new(p).package
   end
 
   def report_dryrun
-    @packages.sort! { |x, y| x[:target_package] <=> y[:target_package] }
-    builder = Builder::XmlMarkup.new(indent: 2)
-    builder.collection do
-      @packages.each do |p|
-        if p[:package].is_a?(Package)
-          builder.package(project: p[:link_target_project].name, package: p[:package].name) do
-            builder.devel(project: p[:copy_from_devel].project.name, package: p[:copy_from_devel].name) if p[:copy_from_devel]
-            builder.target(project: @target_project, package: p[:target_package])
-          end
-        else
-          builder.package(project: p[:link_target_project], package: p[:package]) do
-            builder.devel(project: p[:copy_from_devel].project.name, package: p[:copy_from_devel].name) if p[:copy_from_devel]
-            builder.target(project: @target_project, package: p[:target_package])
-          end
-        end
-      end
-    end
+    BranchPackage::DryRun::Report.new(@packages, @target_project).to_xml
   end
 
   def set_target_project
-    if params[:target_project]
-      @target_project = params[:target_project]
-      @auto_cleanup = ::Configuration.cleanup_after_days if params[:autocleanup] == 'true'
-    else
-      if params[:request]
-        @target_project = User.session!.branch_project_name("REQUEST_#{params[:request]}")
-      elsif params[:project]
-        @target_project = nil # to be set later after first source location lookup
-      else
-        @target_project = User.session!.branch_project_name(@attribute.tr(':', '_'))
-        @target_project += ":#{params[:package]}" if params[:package]
-      end
-      @auto_cleanup = ::Configuration.cleanup_after_days
-    end
-    return unless @target_project && !Project.valid_name?(@target_project)
-    raise InvalidProjectNameError, "invalid project name '#{@target_project}'"
+    target_project_set = BranchPackage::SetTargetProject.new(params)
+    raise InvalidProjectNameError, 'invalid project name' unless target_project_set.valid?
+    @target_project = target_project_set.target_project
+    @auto_cleanup = target_project_set.auto_cleanup
   end
 
   def set_update_project_attribute

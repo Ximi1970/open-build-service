@@ -798,8 +798,13 @@ sub create_jobdata {
   $binfo->{'nodbgpkgs'} = $info->{'nodbgpkgs'} if $info->{'nodbgpkgs'};
   $binfo->{'nosrcpkgs'} = $info->{'nosrcpkgs'} if $info->{'nosrcpkgs'};
   $binfo->{'hostarch'} = $bconf->{'hostarch'} if $bconf->{'hostarch'};
+  $binfo->{'module'} = $bconf->{'modules'} if $bconf->{'modules'};
   my $obsname = $gctx->{'obsname'};
   $binfo->{'disturl'} = "obs://$obsname/$projid/$repoid/$pdata->{'srcmd5'}-$packid" if defined($obsname) && defined($packid);
+
+  # no release/debuginfo for patchinfo and deltarpm builds
+  return $binfo if $buildtype eq 'patchinfo' || $buildtype eq 'deltarpm';
+
   if (defined($packid) && exists($pdata->{'versrel'})) {
     $binfo->{'versrel'} = $pdata->{'versrel'};
     # find the last build count we used for this version/release

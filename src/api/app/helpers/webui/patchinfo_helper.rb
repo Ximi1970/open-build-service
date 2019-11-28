@@ -1,10 +1,4 @@
 module Webui::PatchinfoHelper
-  include Webui::ProjectHelper
-  def patchinfo_bread_crumb(*args)
-    args.insert(0, link_to(@package, package_show_path(project: @project, package: @package)))
-    project_bread_crumb(*args)
-  end
-
   def patchinfo_header(patchinfo, package_names)
     list = package_names.to_sentence
     text = "Update for #{truncate(list, length: 40)}"
@@ -22,7 +16,7 @@ module Webui::PatchinfoHelper
   private
 
   def header_title(patchinfo, text, list)
-    haml_tag(:h3, class: 'mb-0') do
+    haml_tag(:h3) do
       haml_tag(:span, text, title: list)
       haml_tag(:span, patchinfo.category, class: "badge badge-category #{patchinfo.category}", title: 'Category of this patchinfo')
       haml_tag(:span, patchinfo.rating, class: "badge badge-rating #{patchinfo.rating}", title: 'Rating of this patchinfo')
@@ -30,6 +24,6 @@ module Webui::PatchinfoHelper
   end
 
   def header_subtitle(summary)
-    haml_tag(:small, summary, class: 'text-muted') if summary.present?
+    haml_tag(:div, summary, class: 'mb-3 text-muted') if summary.present?
   end
 end

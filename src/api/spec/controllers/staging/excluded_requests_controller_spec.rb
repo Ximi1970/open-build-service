@@ -37,9 +37,15 @@ RSpec.describe Staging::ExcludedRequestsController do
     end
 
     it { expect(response).to have_http_status(:success) }
+
     it 'returns the excluded_requests xml' do
       assert_select 'excluded_requests', 1 do
         assert_select 'request', 2 do
+          assert_select "[id='#{bs_request.number}']"
+          assert_select "[id='#{bs_request_2.number}']"
+          assert_select "[package='#{bs_request.first_target_package}']"
+          assert_select "[package='#{bs_request_2.first_target_package}']"
+          assert_select "[description='Request 2']"
           assert_select "[description='Request 1']"
           assert_select "[description='Request 2']"
         end
@@ -53,7 +59,7 @@ RSpec.describe Staging::ExcludedRequestsController do
     context 'succeeds' do
       before do
         post :create, params: { staging_workflow_project: staging_workflow.project.name, format: :xml },
-                      body: "<excluded_requests><request number='#{bs_request.number}' description='hey'/></excluded_requests>"
+                      body: "<excluded_requests><request id='#{bs_request.number}' description='hey'/></excluded_requests>"
       end
 
       subject { staging_workflow.request_exclusions.last }
@@ -66,7 +72,7 @@ RSpec.describe Staging::ExcludedRequestsController do
     context 'fails: project does not exist' do
       before do
         post :create, params: { staging_workflow_project: 'i_do_not_exist', format: :xml },
-                      body: "<excluded_requests><request number='#{bs_request.number}' description='hey'/></excluded_requests>"
+                      body: "<excluded_requests><request id='#{bs_request.number}' description='hey'/></excluded_requests>"
       end
 
       it { expect(response).to have_http_status(:not_found) }
@@ -76,16 +82,16 @@ RSpec.describe Staging::ExcludedRequestsController do
       let(:project_without_staging) { create(:project, name: 'no_staging') }
       before do
         post :create, params: { staging_workflow_project: project_without_staging, format: :xml },
-                      body: "<excluded_requests><request number='#{bs_request.number}' description='hey'/></excluded_requests>"
+                      body: "<excluded_requests><request id='#{bs_request.number}' description='hey'/></excluded_requests>"
       end
 
-      it { expect(response).to have_http_status(400) }
+      it { expect(response).to have_http_status(404) }
     end
 
     context 'fails: no description, invalid request exclusion' do
       before do
         post :create, params: { staging_workflow_project: staging_workflow.project.name, format: :xml },
-                      body: "<excluded_requests><request number='#{bs_request.number}'/></excluded_requests>"
+                      body: "<excluded_requests><request id='#{bs_request.number}'/></excluded_requests>"
       end
 
       it { expect(response).to have_http_status(400) }
@@ -94,7 +100,18 @@ RSpec.describe Staging::ExcludedRequestsController do
     context 'fails: non-existant bs_request number, invalid request exclusion' do
       before do
         post :create, params: { staging_workflow_project: staging_workflow.project.name, format: :xml },
-                      body: "<excluded_requests><request number='43_543'/></excluded_requests>"
+                      body: "<excluded_requests><request id='43_543'/></excluded_requests>"
+      end
+
+      it { expect(response).to have_http_status(400) }
+    end
+
+    context 'fails: request belongs to a staging project, invalid request exclusion' do
+      before do
+        bs_request.staging_project = staging_workflow.staging_projects.first
+        bs_request.save
+        post :create, params: { staging_workflow_project: staging_workflow.project.name, format: :xml },
+                      body: "<excluded_requests><request id='43_543'/></excluded_requests>"
       end
 
       it { expect(response).to have_http_status(400) }
@@ -111,7 +128,7 @@ RSpec.describe Staging::ExcludedRequestsController do
 
       subject do
         delete :destroy, params: { staging_workflow_project: staging_workflow.project.name, format: :xml },
-                         body: "<requests><number>#{bs_request.number}</number></requests>"
+                         body: "<requests><request id='#{bs_request.number}'/></requests>"
       end
 
       it { expect { subject }.to(change { staging_workflow.request_exclusions.count }.by(-1)) }
@@ -126,7 +143,7 @@ RSpec.describe Staging::ExcludedRequestsController do
     context 'fails: request not excluded' do
       before do
         delete :destroy, params: { staging_workflow_project: staging_workflow.project.name, format: :xml },
-                         body: "<requests><number>#{bs_request.number}</number></requests>"
+                         body: "<requests><request id='#{bs_request.number}'/></requests>"
       end
 
       it { expect(response).to have_http_status(400) }
@@ -137,7 +154,7 @@ RSpec.describe Staging::ExcludedRequestsController do
         request_exclusion
         allow_any_instance_of(ActiveRecord::Relation).to receive(:destroy_all).and_return([])
         delete :destroy, params: { staging_workflow_project: staging_workflow.project.name, format: :xml },
-                         body: "<requests><number>#{bs_request.number}</number></requests>"
+                         body: "<requests><request id='#{bs_request.number}'/></requests>"
       end
 
       it { expect(response).to have_http_status(400) }

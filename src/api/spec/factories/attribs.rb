@@ -7,7 +7,7 @@ FactoryBot.define do
       package { nil }
     end
 
-    after(:create) do |attrib, evaluator|
+    before(:create) do |attrib, evaluator|
       if evaluator.package
         attrib.package = evaluator.package
         attrib.project = nil
@@ -46,6 +46,12 @@ FactoryBot.define do
     factory :project_status_package_fail_comment_attrib do
       attrib_type { AttribType.find_by_namespace_and_name!('OBS', 'ProjectStatusPackageFailComment') }
       values { [build(:attrib_value, value: Faker::Lorem.sentence)] }
+    end
+
+    factory :auto_cleanup_attrib do
+      attrib_type { AttribType.find_by_namespace_and_name!('OBS', 'AutoCleanup') }
+
+      values { [build(:attrib_value, value: 14)] }
     end
 
     factory :attrib_with_default_value do

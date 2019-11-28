@@ -29,21 +29,15 @@ class Webui::PatchinfoController < Webui::WebuiController
     # TODO: check that @tracker has sense if it's coming from create (new_patchinfo) action
     @tracker = ::Configuration.default_tracker
     @patchinfo.binaries.each { |bin| @binarylist.delete(bin) }
-
-    switch_to_webui2
   end
 
   def show
     @pkg_names = @project.packages.pluck(:name)
     @pkg_names.delete('patchinfo')
     @packager = User.where(login: @patchinfo.packager).first
-
-    switch_to_webui2
   end
 
   def update
-    switch_to_webui2
-
     authorize @package, :update?
     @patchinfo = Patchinfo.new(patchinfo_params)
     if @patchinfo.valid?
@@ -77,13 +71,9 @@ class Webui::PatchinfoController < Webui::WebuiController
     if @package.check_weak_dependencies? && @package.destroy
       redirect_to(project_show_path(@project), success: 'Patchinfo was successfully removed.')
     else
-      redirect_to(patchinfo_show_path(package: @package, project: @project),
+      redirect_to(show_patchinfo_path(package: @package, project: @project),
                   notice: "Patchinfo can't be removed: #{@package.errors.full_messages.to_sentence}")
     end
-  end
-
-  def delete_dialog
-    render_dialog
   end
 
   def update_issues

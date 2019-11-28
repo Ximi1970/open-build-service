@@ -2,7 +2,6 @@ class Webui::Users::SubscriptionsController < Webui::WebuiController
   before_action :require_login
 
   def index
-    switch_to_webui2
     @user = User.session!
     @groups_users = @user.groups_users
 
@@ -27,7 +26,7 @@ class Webui::Users::SubscriptionsController < Webui::WebuiController
   ensure
     respond_to do |format|
       format.html { redirect_to action: :index }
-      format.js { render 'webui2/webui/users/subscriptions/update' }
+      format.js { render 'webui/users/subscriptions/update' }
     end
   end
 

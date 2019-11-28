@@ -1,6 +1,6 @@
 require 'browser_helper'
 
-RSpec.feature 'Watchlists', type: :feature, js: true do
+RSpec.feature 'Bootstrap_Watchlists', type: :feature, js: true, vcr: true do
   let(:user) { create(:confirmed_user, :with_home, login: 'kody') }
   let(:project) { create(:project, name: 'watchlist_test_project') }
   let(:user_with_watched_project) do
@@ -11,50 +11,46 @@ RSpec.feature 'Watchlists', type: :feature, js: true do
   end
 
   scenario 'add projects to watchlist' do
-    skip_if_bootstrap
-
     login user
     visit project_show_path(user.home_project)
 
-    page.execute_script("$('#menu-favorites').show();")
+    click_on('Watchlist')
     expect(page).to have_content('List of projects you are watching')
-    expect(page).to have_css('a span.project-link', count: 0)
+    expect(page).to have_css('a.dropdown-item.project-link', count: 0)
 
-    expect(page).to have_css('#menu-favorites', text: 'Add this project to Watchlist')
-    find(:css, '#toggle-watch > span.desc').click
+    expect(page).to have_css('#toggle-watch', text: 'Add this project to Watchlist')
+    find('#toggle-watch').click
 
-    page.execute_script("$('#menu-favorites').show();")
-    expect(page).to have_css('a span.project-link', text: user.home_project_name)
-    expect(page).to have_css('a span.project-link', count: 1)
+    click_on('Watchlist')
+    expect(page).to have_css('a.dropdown-item.project-link', text: user.home_project_name)
+    expect(page).to have_css('a.dropdown-item.project-link', count: 1)
 
     visit project_show_path(project: project.name)
-    page.execute_script("$('#menu-favorites').show();")
-    expect(page).to have_css('#menu-favorites', text: 'Add this project to Watchlist')
-    find(:css, '#toggle-watch > span.desc').click
+    click_on('Watchlist')
+    expect(page).to have_css('#toggle-watch', text: 'Add this project to Watchlist')
+    find('#toggle-watch').click
 
-    page.execute_script("$('#menu-favorites').show();")
-    expect(page).to have_css('a span.project-link', text: user.home_project_name)
-    expect(page).to have_css('a span.project-link', text: project.name)
-    expect(page).to have_css('a span.project-link', count: 2)
+    click_on('Watchlist')
+    expect(page).to have_css('a.dropdown-item.project-link', text: user.home_project_name)
+    expect(page).to have_css('a.dropdown-item.project-link', text: project.name)
+    expect(page).to have_css('a.dropdown-item.project-link', count: 2)
   end
 
   scenario 'remove projects from watchlist' do
-    skip_if_bootstrap
-
     login user_with_watched_project
     visit project_show_path(project: 'brian_s_watched_project')
 
-    page.execute_script("$('#menu-favorites').show();")
+    click_on('Watchlist')
     expect(page).to have_content('List of projects you are watching')
-    expect(page).to have_css('a span.project-link', text: 'brian_s_watched_project')
-    expect(page).to have_css('a span.project-link', count: 1)
-    expect(page).to have_css('#menu-favorites', text: 'Remove this project from Watchlist')
+    expect(page).to have_css('a.dropdown-item.project-link', text: 'brian_s_watched_project')
+    expect(page).to have_css('a.dropdown-item.project-link', count: 1)
+    expect(page).to have_css('#toggle-watch', text: 'Remove this project from Watchlist')
 
-    find(:css, '#toggle-watch > span.desc').click
+    find('#toggle-watch').click
 
     visit project_show_path(project: 'brian_s_watched_project')
-    page.execute_script("$('#menu-favorites').show();")
-    expect(page).to have_css('a span.project-link', count: 0)
-    expect(page).to have_css('#menu-favorites', text: 'Add this project to Watchlist')
+    click_on('Watchlist')
+    expect(page).to have_css('a.dropdown-item.project-link', count: 0)
+    expect(page).to have_css('#toggle-watch', text: 'Add this project to Watchlist')
   end
 end

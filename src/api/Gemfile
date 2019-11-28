@@ -78,13 +78,15 @@ gem 'addressable'
 # for XML builder
 gem 'builder'
 # to write the rails metrics directly into InfluxDB.
-gem 'experimental-influxdb-rails', '>=1.0.0.beta5'
+gem 'influxdb-rails', '1.0.0'
 # for client side time ago
 gem 'rails-timeago', '~> 2.0'
 # for copying objects with their relations
-gem 'deep_cloneable', '~> 2.4.0'
+gem 'deep_cloneable', '~> 3.0.0'
 # Server-side datatables
 gem 'ajax-datatables-rails'
+# Add syntax highlight in ruby
+gem 'coderay'
 
 group :development, :production do
   # to have the delayed job daemon
@@ -192,8 +194,6 @@ group :assets do
   gem 'sassc-rails'
   # assets for jQuery DataTables
   gem 'jquery-datatables'
-  # assets for the text editor
-  gem 'codemirror-rails'
   # assets for jQuery tokeninput
   gem 'rails_tokeninput', '>= 1.6.1.rc1'
   # to create our sprite images/stylesheets
@@ -210,4 +210,8 @@ group :assets do
   gem 'font-awesome-sass'
   # assets for formatting dates
   gem 'momentjs-rails'
+  # for catching javascript exceptions
+  source 'https://rails-assets.org' do
+    gem 'rails-assets-airbrake-js-client'
+  end
 end
